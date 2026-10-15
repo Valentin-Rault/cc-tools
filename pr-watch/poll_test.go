@@ -210,3 +210,28 @@ func TestBackgroundRefresh(t *testing.T) {
 		t.Error("no background refresh after", backgroundRefresh)
 	}
 }
+
+// Merged or closed PRs you reviewed lose their owner too, and new activity on the ones still open becomes events.
+func TestReviewedPRsInThePoll(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.SaveReviewedSnapshot(map[string]ReviewedStored{"8": {Head: "h7"}, "99": {Head: "x"}})
+	store.Claim(Owner{Name: "rev-session"}, []int{8, 99})
+	w, gh, _ := newTestWatcher(t, store)
+	gh.search.Reviewed.Nodes[0].Commits.Nodes = []struct{ Commit struct{ Oid string } }{{struct{ Oid string }{"h7"}}, {struct{ Oid string }{"h8"}}}
+	r := w.Poll(true)
+	if !slices.Equal(r.Closed, []int{99}) {
+		t.Errorf("closed = %v", r.Closed)
+	}
+	if o := store.Owners(); len(o) != 1 || o[8].Name != "rev-session" {
+		t.Errorf("owners = %v", o)
+	}
+	var reviewer []string
+	for _, e := range r.Events {
+		if e.Role == "reviewer" {
+			reviewer = append(reviewer, e.Text)
+		}
+	}
+	if !slices.Equal(reviewer, []string{"pushed 1 commit https://gh/pr/8/files/h7..h8"}) {
+		t.Errorf("reviewer events = %q", reviewer)
+	}
+}

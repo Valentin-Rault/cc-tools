@@ -57,6 +57,13 @@ A pick or a claim wins over the link and records the session's ID, so the PR sta
 itself. When the PR is merged or closed its owner is dropped; `x` also purges owners and undelivered events of PRs
 that aren't open anymore.
 
+**PRs you reviewed.** On someone else's PR you reviewed, new replies in your threads, comments, pushed commits and
+a new request for your review are events too. They go to the session reviewing it, with instructions to draft the
+follow-up and show it to you before posting. A review session usually has no pr-link (that's only for the branch a
+session is on), so pr-watch counts which session named the PR in its commands and in your prompts (`gh pr view 12`,
+`…/pull/12`). When one clearly stands out, the picker pre-selects it, or offers to resume it if it isn't running;
+confirming once routes all the PR's events there.
+
 The `o` picker lists the running sessions (the linked one, or the one with the PR's branch checked out, is
 preselected) and two ways to start one in a new zellij tab, with the PR's waiting events as its opening prompt:
 

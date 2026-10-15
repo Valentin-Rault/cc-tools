@@ -68,3 +68,11 @@ cat "$STREAM"
 		t.Fatal("a transcript with another message should fail the send")
 	}
 }
+
+func TestReviewerMessage(t *testing.T) {
+	m := message(12, []Event{{Text: "reply by alice u", Role: "reviewer"}})
+	if !strings.Contains(m, "[pr-watch event] PR #12: reply by alice u") || !strings.Contains(m, "PR the user reviewed") ||
+		strings.Contains(m, "prepare the fix") {
+		t.Errorf("reviewer message:\n%s", m)
+	}
+}

@@ -51,7 +51,7 @@ type PollResult struct {
 	Events    []Event
 	Interval  time.Duration // GitHub's X-Poll-Interval
 	Refreshed bool
-	Closed    []int // PRs that left your open PRs since the last refresh (merged or closed)
+	Closed    []int // PRs that left your open or reviewed PRs since the last refresh (merged or closed)
 	Err       error
 }
 
@@ -102,15 +102,8 @@ func (w *Watcher) Poll(force bool) PollResult {
 
 	r := PollResult{Interval: w.interval}
 	if need {
-		old := w.snap
-		events, err := w.refresh(now)
-		r.Events, r.Refreshed = events, err == nil
-		for pr := range old {
-			if _, open := w.snap[pr]; !open && err == nil {
-				n, _ := strconv.Atoi(pr)
-				r.Closed = append(r.Closed, n)
-			}
-		}
+		events, closed, err := w.refresh(now)
+		r.Events, r.Closed, r.Refreshed = events, closed, err == nil
 		if len(r.Closed) > 0 { // their owners have nothing left to receive
 			errs = append(errs, w.store.Unclaim(r.Closed))
 		}
@@ -147,23 +140,40 @@ func (w *Watcher) readNotifications(items []notification, stamp string) (need bo
 	return need
 }
 
-func (w *Watcher) refresh(now time.Time) ([]Event, error) {
+// refresh reads your PRs and the ones you reviewed, and returns what's new and which PRs closed since last time.
+func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err error) {
 	d, err := w.gh.Search(w.cfg.Repo, w.me)
 	if err != nil {
 		w.store.write("retry", "")
-		return nil, fmt.Errorf("refresh: %w", err)
+		return nil, nil, fmt.Errorf("refresh: %w", err)
 	}
 	prs := normalize(d.Mine.Nodes, w.me, w.cfg.Ignore)
-	var events []Event
 	if w.snap != nil { // the very first refresh only sets the baseline
 		events = diff(w.snap, prs, now)
 	}
 	snap := snapshot(prs)
 	if err := w.store.SaveSnapshot(snap); err != nil {
-		return nil, fmt.Errorf("saving the snapshot: %w", err)
+		return nil, nil, fmt.Errorf("saving the snapshot: %w", err)
 	}
-	w.snap = snap
-	w.reviewed = reviewedPRs(d.Reviewed.Nodes, w.me, w.cfg.Ignore)
+	reviewed := reviewedPRs(d.Reviewed.Nodes, w.me, w.cfg.Ignore)
+	oldReviewed, ok := w.store.ReviewedSnapshot()
+	if ok {
+		events = append(events, diffReviewed(oldReviewed, reviewed, now)...)
+	}
+	newReviewed := reviewedSnapshot(reviewed)
+	if err := w.store.SaveReviewedSnapshot(newReviewed); err != nil {
+		return nil, nil, fmt.Errorf("saving the reviewed snapshot: %w", err)
+	}
+	for _, pair := range []struct {
+		old, now map[string]bool
+	}{{keys(w.snap), keys(snap)}, {keys(oldReviewed), keys(newReviewed)}} {
+		for pr := range pair.old {
+			if n, err := strconv.Atoi(pr); err == nil && !pair.now[pr] {
+				closed = append(closed, n)
+			}
+		}
+	}
+	w.snap, w.reviewed = snap, reviewed
 	w.toReview = nil
 	for _, n := range d.Review.Nodes {
 		// a PR you already reviewed and are asked to look at again shows under Reviewed, not twice
@@ -185,7 +195,15 @@ func (w *Watcher) refresh(now time.Time) ([]Event, error) {
 	for _, e := range events {
 		w.store.appendLine("events.log", fmt.Sprintf("%s #%d owner=%s %s", stamp, e.PR, cmp.Or(owners[e.PR].Name, "?"), e.Text))
 	}
-	return events, nil
+	return events, closed, nil
+}
+
+func keys[V any](m map[string]V) map[string]bool {
+	out := map[string]bool{}
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }
 
 // pushedRefs hashes the local origin/<branch> refs of your open PRs: a push from any worktree moves one,

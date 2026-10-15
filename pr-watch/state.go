@@ -18,7 +18,7 @@ import (
 const hotFor = 10 * time.Minute
 
 // Store is the state directory, shared with `pr-watch claim` run from Claude sessions. One small file per concern:
-// owners, snapshot.json, pending.json, events.log, notified, since, last-modified, hot-until, refs, retry, me, pid.
+// owners, snapshot.json, reviewed.json, pending.json, events.log, notified, since, last-modified, hot-until, refs, retry, me, pid.
 type Store struct{ Dir string }
 
 func (s Store) path(name string) string { return filepath.Join(s.Dir, name) }
@@ -141,6 +141,19 @@ func (s Store) Snapshot() (snap map[string]Stored, ok bool) {
 }
 
 func (s Store) SaveSnapshot(snap map[string]Stored) error { return s.writeJSON("snapshot.json", snap) }
+
+// ReviewedSnapshot is the last refresh of the PRs you reviewed. ok is false when there is none yet.
+func (s Store) ReviewedSnapshot() (snap map[string]ReviewedStored, ok bool) {
+	b, err := os.ReadFile(s.path("reviewed.json"))
+	if err != nil || json.Unmarshal(b, &snap) != nil {
+		return nil, false
+	}
+	return snap, true
+}
+
+func (s Store) SaveReviewedSnapshot(snap map[string]ReviewedStored) error {
+	return s.writeJSON("reviewed.json", snap)
+}
 
 // Pending holds events not delivered yet, so quitting the TUI doesn't lose them.
 func (s Store) Pending() []Event {

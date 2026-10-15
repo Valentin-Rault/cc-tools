@@ -17,9 +17,12 @@ import (
 var errOwnerGone = errors.New("the owner session isn't running")
 
 type (
-	pollMsg     PollResult
-	tickMsg     time.Time
-	linksMsg    map[int]prLink
+	pollMsg  PollResult
+	tickMsg  time.Time
+	linksMsg struct {
+		links    map[int]prLink
+		mentions map[int][]mention
+	}
 	sessionsMsg struct {
 		sessions []Session
 		err      error
@@ -60,6 +63,7 @@ type model struct {
 	events   []Event // oldest first
 	owners   map[int]Owner
 	links    map[int]prLink
+	mentions map[int][]mention
 	sessions []Session
 	inflight map[int]bool
 
@@ -125,7 +129,10 @@ func (m *model) pollCmd(force bool) tea.Cmd {
 // linksCmd reads what Claude Code appended to its transcripts about which session works on which PR.
 func (m *model) linksCmd() tea.Cmd {
 	idx := m.linkIdx
-	return func() tea.Msg { return linksMsg(idx.update()) }
+	return func() tea.Msg {
+		links, mentions := idx.update()
+		return linksMsg{links, mentions}
+	}
 }
 
 func tick() tea.Cmd {
@@ -205,7 +212,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.dispatch()
 
 	case linksMsg:
-		m.linking, m.links = false, msg
+		m.linking, m.links, m.mentions = false, msg.links, msg.mentions
 		return m, m.dispatch()
 
 	case sentMsg:
@@ -334,7 +341,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	case "o", "s", "g":
 		pr := m.selectedPR()
 		if pr == 0 {
-			m.flash = "select one of your PRs or an event first"
+			m.flash = "select one of your PRs, a PR you reviewed, or an event first"
 			return m, nil
 		}
 		switch k {
@@ -367,29 +374,41 @@ func (m *model) ownerOf(pr int) Owner {
 }
 
 func (m *model) openPicker(pr int) {
-	s := m.prs[strconv.Itoa(pr)]
+	info := m.prInfo(pr)
 	p := &picker{pr: pr}
 	link, linked := m.links[pr]
+	if !linked && info.Reviewing { // a review session has no pr-link: the session that named the PR stands in
+		if r, ok := m.likelyReviewer(pr); ok {
+			link, linked = prLink{SessionID: r.SessionID, Cwd: r.Cwd}, true
+		}
+	}
 	linkedLive := false
 	if linked {
 		_, linkedLive = resolve(m.sessions, Owner{SessionID: link.SessionID})
 	}
 	if linked && !linkedLive && isDir(link.Cwd) {
-		p.choices = append(p.choices, choice{kind: chooseResume, link: link,
-			label: "＋ resume the session that worked on it", note: "new tab · " + tilde(link.Cwd) + " · last on it " + agoString(link.At)})
+		label, note := "＋ resume the session that worked on it", "new tab · "+tilde(link.Cwd)+" · last on it "+agoString(link.At)
+		if info.Reviewing {
+			label, note = "＋ resume the session that reviewed it", "new tab · "+tilde(link.Cwd)
+		}
+		p.choices = append(p.choices, choice{kind: chooseResume, link: link, label: label, note: note})
 	}
 	if m.cfg.RepoDir != "" {
 		where := "creates " + tilde(newWorktreePath(m.cfg.RepoDir, pr))
-		if trees, err := worktrees(m.cfg.RepoDir); err == nil && trees[s.Branch] != "" {
-			where = tilde(trees[s.Branch])
+		if info.Reviewing { // reviewing needs no worktree of its own
+			where = tilde(m.cfg.RepoDir)
 		}
-		p.choices = append(p.choices, choice{kind: chooseNew, label: "＋ new Claude session", note: "new tab · " + where})
+		if trees, err := worktrees(m.cfg.RepoDir); err == nil && trees[info.Branch] != "" {
+			where = tilde(trees[info.Branch])
+		}
+		label := map[bool]string{true: "＋ new review session", false: "＋ new Claude session"}[info.Reviewing]
+		p.choices = append(p.choices, choice{kind: chooseNew, label: label, note: "new tab · " + where})
 	}
 	for _, x := range m.sessions {
 		note := x.Status + "  " + tilde(x.Cwd)
 		if linked && x.SessionID == link.SessionID {
-			note += "  ← worked on this PR"
-		} else if x.Branch != "" && x.Branch == s.Branch {
+			note += map[bool]string{true: "  ← reviewed this PR", false: "  ← worked on this PR"}[info.Reviewing]
+		} else if x.Branch != "" && x.Branch == info.Branch {
 			note += "  ← has this branch checked out"
 		}
 		p.choices = append(p.choices, choice{kind: chooseSession, session: x, label: x.Name, note: note})
@@ -448,9 +467,12 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 	if m.inflight[pr] {
 		return nil
 	}
-	s := m.prs[strconv.Itoa(pr)]
+	info := m.prInfo(pr)
 	prev, hadPrev := m.owners[pr]
 	owner := Owner{Name: fmt.Sprintf("pr-%d", pr), SessionID: newUUID()}
+	if info.Reviewing {
+		owner.Name = fmt.Sprintf("review-%d", pr)
+	}
 	if c.kind == chooseResume {
 		owner.SessionID = c.link.SessionID // a resumed session keeps its ID
 	}
@@ -468,14 +490,21 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 	m.owners, m.inflight[pr] = m.store.Owners(), true
 	m.savePending()
 	m.flash = fmt.Sprintf("#%d: opening a new tab", pr)
-	prompt, title, repoDir := handover(pr, s, batch), fmt.Sprintf("PR #%d", pr), m.cfg.RepoDir
+	prompt, title, repoDir := handover(pr, info, batch), fmt.Sprintf("PR #%d", pr), m.cfg.RepoDir
 	return func() tea.Msg {
 		var err error
-		if c.kind == chooseResume {
+		switch {
+		case c.kind == chooseResume:
 			err = openTab(title, c.link.Cwd, "--resume", c.link.SessionID, prompt)
-		} else {
+		case info.Reviewing:
+			dir := repoDir
+			if trees, terr := worktrees(repoDir); terr == nil && trees[info.Branch] != "" {
+				dir = trees[info.Branch]
+			}
+			err = openTab(title, dir, "--session-id", owner.SessionID, "-n", owner.Name, prompt)
+		default:
 			var dir string
-			if dir, err = worktreeFor(repoDir, s.Branch, pr); err == nil {
+			if dir, err = worktreeFor(repoDir, info.Branch, pr); err == nil {
 				err = openTab(title, dir, "--session-id", owner.SessionID, "-n", owner.Name, prompt)
 			}
 		}
@@ -556,7 +585,7 @@ func (m *model) purge() {
 		m.flash = "nothing to purge against yet: wait for the first refresh"
 		return
 	}
-	open := func(pr int) bool { _, ok := m.prs[strconv.Itoa(pr)]; return ok }
+	open := func(pr int) bool { _, mine := m.prs[strconv.Itoa(pr)]; return mine || m.prInfo(pr).Reviewing }
 	var gone []int
 	for pr := range m.store.Owners() {
 		if !open(pr) {
@@ -644,12 +673,16 @@ func (m *model) shownEvent(i int) (Event, bool) {
 	return m.events[len(m.events)-1-i], true
 }
 
-// selectedPR is the PR of yours that the focused row is about, or 0.
+// selectedPR is the PR the focused row is about, yours or one you reviewed, or 0.
 func (m *model) selectedPR() int {
 	switch m.panel() {
 	case panelMine:
 		if prs := m.prList(); m.cursor[panelMine] < len(prs) {
 			return prs[m.cursor[panelMine]]
+		}
+	case panelReviewed:
+		if i := m.cursor[panelReviewed]; i < len(m.reviewed) {
+			return m.reviewed[i].Number
 		}
 	case panelEvents:
 		if e, ok := m.shownEvent(m.cursor[panelEvents]); ok {
@@ -681,21 +714,26 @@ func (m *model) selectedURL() string {
 	return m.prs[strconv.Itoa(m.selectedPR())].URL
 }
 
-// suggest names the running session most likely to own the PR: the one Claude Code links it to, else the only one
-// with its branch checked out.
+// suggest names the running session most likely to own the PR: the one Claude Code links it to, else the one that
+// clearly named it most (a review session), else the only one with its branch checked out.
 func (m *model) suggest(pr int) string {
 	if l, ok := m.links[pr]; ok {
 		if s, ok := resolve(m.sessions, Owner{SessionID: l.SessionID}); ok {
 			return s.Name
 		}
 	}
-	s, ok := m.prs[strconv.Itoa(pr)]
-	if !ok {
+	if r, ok := m.likelyReviewer(pr); ok {
+		if s, ok := resolve(m.sessions, Owner{SessionID: r.SessionID}); ok {
+			return s.Name
+		}
+	}
+	info := m.prInfo(pr)
+	if info.Branch == "" {
 		return ""
 	}
 	found := ""
 	for _, x := range m.sessions {
-		if x.Branch != "" && x.Branch == s.Branch {
+		if x.Branch != "" && x.Branch == info.Branch {
 			if found != "" {
 				return ""
 			}
@@ -742,4 +780,32 @@ func agoString(rfc3339 string) string {
 		return "?"
 	}
 	return ago(time.Since(t)) + " ago"
+}
+
+// prInfo is what pr-watch knows about a PR it lists: one of yours, or one you reviewed.
+type prInfo struct {
+	Title, URL, Branch, Author string
+	Reviewing                  bool
+}
+
+func (m *model) prInfo(pr int) prInfo {
+	if s, ok := m.prs[strconv.Itoa(pr)]; ok {
+		return prInfo{Title: s.Title, URL: s.URL, Branch: s.Branch}
+	}
+	for _, r := range m.reviewed {
+		if r.Number == pr {
+			return prInfo{Title: r.Title, URL: r.URL, Branch: r.Branch, Author: r.Author, Reviewing: true}
+		}
+	}
+	return prInfo{}
+}
+
+// likelyReviewer is the session that named the PR most, when it clearly stands out: at least 3 times, and twice as
+// often as any other. It may not be running anymore.
+func (m *model) likelyReviewer(pr int) (mention, bool) {
+	ms := m.mentions[pr]
+	if len(ms) == 0 || ms[0].Count < 3 || len(ms) > 1 && ms[0].Count < 2*ms[1].Count {
+		return mention{}, false
+	}
+	return ms[0], true
 }

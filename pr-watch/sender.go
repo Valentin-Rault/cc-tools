@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -18,11 +19,18 @@ import (
 const instructions = `Investigate and prepare the fix or reply locally. Before any git push, PR comment, review reply or thread resolve, show the user the diff or draft and wait for their OK. Never merge, enqueue or enable auto-merge.
 Sent by the pr-watch TUI; no reply needed.`
 
+// reviewerInstructions go to the session reviewing someone else's PR.
+const reviewerInstructions = `This is a PR the user reviewed. Read the replies and the new commits, then draft the follow-up (replies, new review comments, threads to resolve) and show it to the user before posting anything. Never approve or request changes without the user's OK, and never merge.
+Sent by the pr-watch TUI; no reply needed.`
+
 // message is what the owner session receives: one "[pr-watch event]" line per event, then what to do.
 func message(pr int, events []Event) string {
 	var b strings.Builder
 	for _, e := range events {
 		fmt.Fprintf(&b, "[pr-watch event] PR #%d: %s\n", pr, e.Text)
+	}
+	if slices.ContainsFunc(events, func(e Event) bool { return e.Role == "reviewer" }) {
+		return b.String() + "\n" + reviewerInstructions
 	}
 	return b.String() + "\n" + instructions
 }

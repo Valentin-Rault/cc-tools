@@ -74,12 +74,20 @@ func openTab(title, dir string, claudeArgs ...string) error {
 }
 
 // handover is the opening prompt of a session that takes a PR over: what the PR is, then its events.
-func handover(pr int, s Stored, events []Event) string {
+func handover(pr int, info prInfo, events []Event) string {
+	role := ""
+	if info.Reviewing {
+		role = "reviewer"
+	}
 	if len(events) == 0 {
-		events = []Event{{Text: "handed to this session; nothing to act on yet, pr-watch will message you"}}
+		events = []Event{{Text: "handed to this session; nothing to act on yet, pr-watch will message you", Role: role}}
+	}
+	if info.Reviewing {
+		return fmt.Sprintf("pr-watch handed your review of PR #%d to this session: %s, by %s. You reviewed it before; "+
+			"catch up with `gh pr view %d --comments` and `gh pr diff %d`.\n\n", pr, info.URL, info.Author, pr, pr) + message(pr, events)
 	}
 	return fmt.Sprintf("pr-watch handed PR #%d to this session: %s (branch %s). If you don't know this PR yet, start "+
-		"with `gh pr view %d` and `gh pr diff %d`.\n\n", pr, s.URL, s.Branch, pr, pr) + message(pr, events)
+		"with `gh pr view %d` and `gh pr diff %d`.\n\n", pr, info.URL, info.Branch, pr, pr) + message(pr, events)
 }
 
 func newUUID() string {

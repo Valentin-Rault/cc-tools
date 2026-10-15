@@ -304,3 +304,83 @@ func TestHighlightLiftsDimText(t *testing.T) {
 		t.Errorf("highlighted row keeps its dim colours: %q", got)
 	}
 }
+
+func reviewingModel(t *testing.T) *model {
+	m := testModel(t)
+	m.cfg.RepoDir = t.TempDir()
+	m.reviewed = []ReviewedPR{{Number: 2757, Title: "Skip the metadata probe", URL: "https://gh/pr/2757", Author: "frank",
+		Branch: "fix/probe", Verdict: "COMMENTED", ReviewedAt: time.Now().Add(-time.Hour), Replies: 5, NewCommits: 1}}
+	m.sessions = append(m.sessions, Session{Name: "rev-a", SessionID: "id-rev", Cwd: "/code/widgets"})
+	m.mentions = map[int][]mention{2757: {{SessionID: "id-rev", Cwd: "/code/widgets", Count: 55}, {SessionID: "id-x", Count: 18}}}
+	return m
+}
+
+func TestLikelyReviewer(t *testing.T) {
+	m := reviewingModel(t)
+	if r, ok := m.likelyReviewer(2757); !ok || r.SessionID != "id-rev" {
+		t.Errorf("55 vs 18 should stand out: %+v %v", r, ok)
+	}
+	m.mentions[2757][1].Count = 40
+	if _, ok := m.likelyReviewer(2757); ok {
+		t.Error("55 vs 40 shouldn't")
+	}
+	m.mentions[2757] = []mention{{SessionID: "id-rev", Count: 2}}
+	if _, ok := m.likelyReviewer(2757); ok {
+		t.Error("two mentions are too few")
+	}
+}
+
+// o on the Reviewed list pre-selects the session that clearly reviewed the PR; events go there once confirmed,
+// with the reviewer's instructions.
+func TestReviewedPRsRouteToTheReviewSession(t *testing.T) {
+	m := reviewingModel(t)
+	m.events = append(m.events, Event{PR: 2757, Text: "reply by frank u/r1", Role: "reviewer"})
+	m.dispatch()
+	if e := m.events[len(m.events)-1]; e.Status != NeedsOwner {
+		t.Fatalf("a reviewer event without a confirmed session should wait: %+v", e)
+	}
+	press(m, "right", "right")
+	press(m, "o")
+	if m.picker == nil {
+		t.Fatal("o on the Reviewed list opened no picker")
+	}
+	c := m.picker.choices[m.picker.cursor]
+	if c.kind != chooseSession || c.label != "rev-a" || !strings.Contains(c.note, "reviewed this PR") {
+		t.Fatalf("preselected %+v", c)
+	}
+	if nc := m.picker.choices[0]; nc.kind != chooseNew || nc.label != "＋ new review session" || !strings.Contains(nc.note, tilde(m.cfg.RepoDir)) {
+		t.Errorf("new session entry = %+v", nc)
+	}
+	m.width, m.height = 130, 24
+	if v := screen(m); !strings.Contains(v, "you reviewed it · by frank") {
+		t.Errorf("picker:\n%s", v)
+	}
+	m.pickerKey("enter")
+	if o := m.store.Owners()[2757]; o != (Owner{"rev-a", "id-rev"}) {
+		t.Errorf("owner = %+v", o)
+	}
+	if e := m.events[len(m.events)-1]; e.Status != Sending || e.Owner != "rev-a" {
+		t.Errorf("event after confirming = %+v", e)
+	}
+}
+
+// When the reviewing session isn't running, the picker offers to resume it.
+func TestPickerResumesTheReviewSession(t *testing.T) {
+	m := reviewingModel(t)
+	m.sessions = m.sessions[:2]
+	cwd := t.TempDir()
+	m.mentions[2757][0].Cwd = cwd
+	m.openPicker(2757)
+	if c := m.picker.choices[0]; c.kind != chooseResume || c.link.SessionID != "id-rev" || c.label != "＋ resume the session that reviewed it" {
+		t.Errorf("first choice = %+v", c)
+	}
+}
+
+func TestPurgeKeepsReviewedPRs(t *testing.T) {
+	m := reviewingModel(t)
+	m.store.Claim(Owner{Name: "rev-a"}, []int{2757})
+	press(m, "x")
+	if _, ok := m.store.Owners()[2757]; !ok {
+		t.Error("purge dropped the owner of an open PR you reviewed")
+	}
+}

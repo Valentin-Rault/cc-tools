@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"testing"
+	"time"
 )
 
 const reviewedFixture = `[
@@ -57,5 +59,31 @@ func TestReviewedPRs(t *testing.T) {
 	}
 	if quiet.NeedsYou() || quiet.Verdict != "CHANGES_REQUESTED" {
 		t.Errorf("quiet = %+v", quiet)
+	}
+}
+
+func TestDiffReviewed(t *testing.T) {
+	now := ReviewedPR{Number: 10, URL: "https://gh/pr/10", Author: "alice", HeadOid: "d", AskedAgain: true,
+		Commits: []string{"a", "b", "c", "d"},
+		Items:   []Item{{ID: "old", Kind: "reply", Who: "alice", URL: "u/old"}, {ID: "r2", Kind: "reply", Who: "alice", URL: "u/r2"}, {ID: "c1", Kind: "comment", Who: "carol", URL: "u/c1"}}}
+	forced := ReviewedPR{Number: 13, URL: "https://gh/pr/13", HeadOid: "new", Commits: []string{"new"}}
+	fresh := ReviewedPR{Number: 14, URL: "https://gh/pr/14", HeadOid: "x", Items: []Item{{ID: "z", Kind: "comment", Who: "bob"}}}
+	old := map[string]ReviewedStored{"10": {Head: "b", Seen: []string{"old"}}, "13": {Head: "old"}}
+	var got []string
+	for _, e := range diffReviewed(old, []ReviewedPR{now, forced, fresh}, time.Now()) {
+		if e.Role != "reviewer" {
+			t.Errorf("event without the reviewer role: %+v", e)
+		}
+		got = append(got, "#"+strconv.Itoa(e.PR)+" "+e.Text)
+	}
+	want := []string{
+		"#10 asked-again by alice https://gh/pr/10",
+		"#10 pushed 2 commits https://gh/pr/10/files/b..d",
+		"#10 reply by alice u/r2",
+		"#10 comment by carol u/c1",
+		"#13 pushed new commits https://gh/pr/13",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("events:\n got %q\nwant %q", got, want)
 	}
 }

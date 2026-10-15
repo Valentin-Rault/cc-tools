@@ -241,10 +241,11 @@ var verdicts = map[string]struct {
 	"COMMENTED": {"◇", "commented", blue}, "DISMISSED": {"·", "dismissed", comment},
 }
 
-// reviewedRow: your verdict, what happened since your review, and when you reviewed. One with nothing new fades.
+// reviewedRow: your verdict, what happened since your review, when you reviewed, and the session reviewing it.
+// One with nothing new fades.
 func (m *model) reviewedRow(r ReviewedPR, w int) string {
-	const authorW, verdictW, sinceW, whenW = 12, 20, 44, 4
-	titleW := max(16, w-7-2-authorW-2-verdictW-2-sinceW-2-whenW)
+	const authorW, verdictW, sinceW, whenW, ownerW = 12, 20, 44, 4, 26
+	titleW := max(16, w-7-2-authorW-2-verdictW-2-sinceW-2-whenW-2-ownerW)
 	quiet := !r.NeedsYou()
 	dimIf := func(s lipgloss.Style) lipgloss.Style {
 		if quiet {
@@ -278,7 +279,7 @@ func (m *model) reviewedRow(r ReviewedPR, w int) string {
 	}
 	return dimIf(text).Render(fmt.Sprintf("#%-6d", r.Number)) + cell(title, titleW) + "  " + cell(dimIf(text2).Render(r.Author), authorW) +
 		"  " + cell(v.style.Render(v.glyph)+" "+dimIf(v.style).Render(v.label), verdictW) + "  " + cell(sinceText, sinceW) +
-		"  " + comment.Render(ago(time.Since(r.ReviewedAt)))
+		"  " + cell(comment.Render(ago(time.Since(r.ReviewedAt))), whenW) + "  " + m.ownerCell(r.Number)
 }
 
 func plural(n int, one, many string) string {
@@ -294,6 +295,7 @@ var kinds = map[string]struct {
 }{
 	"ci-failed": {"✗", red}, "changes-requested": {"◆", orange}, "review": {"◇", blue},
 	"comment": {"✎", cyan}, "left-merge-queue": {"↩", yellow},
+	"reply": {"↳", cyan}, "pushed": {"↑", yellow}, "asked-again": {"↻", yellow}, // on PRs you reviewed
 }
 
 // eventRows lays the events out newest first, under a line per day. rowOf maps each event to its row.
@@ -421,7 +423,7 @@ func (m *model) statusLine(w int) string {
 // overlayPicker dims the screen and floats the owner picker over it.
 func (m *model) overlayPicker(lines []string, w int) []string {
 	p := m.picker
-	s := m.prs[strconv.Itoa(p.pr)]
+	info := m.prInfo(p.pr)
 	bw := min(w-4, 112)
 	var rows []string
 	for _, c := range p.choices {
@@ -436,7 +438,11 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 		}
 		rows = append(rows, row)
 	}
-	inner := []string{" " + text.Render(s.Title) + faint.Render("  "+s.Branch), ""}
+	sub := info.Branch
+	if info.Reviewing {
+		sub = "you reviewed it · by " + info.Author
+	}
+	inner := []string{" " + text.Render(info.Title) + faint.Render("  "+sub), ""}
 	if len(rows) == 0 {
 		inner = append(inner, " "+red.Render("no running Claude sessions, and no repo_dir configured to start one"))
 	}

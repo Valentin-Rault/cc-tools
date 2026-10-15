@@ -56,6 +56,7 @@ type Event struct {
 	Status Status    `json:"status"`
 	Owner  string    `json:"owner,omitempty"` // the session it went (or was going) to
 	Note   string    `json:"note,omitempty"`  // why a send failed
+	Role   string    `json:"role,omitempty"`  // "reviewer" on a PR you reviewed; empty on your own PRs
 }
 
 var failedConclusions = []string{"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED"}

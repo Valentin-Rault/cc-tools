@@ -30,12 +30,12 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
     number title url isDraft createdAt additions deletions author { login }
   } } }
   reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
-    number title url isDraft headRefOid author { login }
+    number title url isDraft headRefOid headRefName author { login }
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
     reviews(last: 10, author: $me) { nodes { state submittedAt commit { oid } } }
     commits(last: 50) { nodes { commit { oid } } }
-    comments(last: 30) { nodes { createdAt author { login } } }
-    reviewThreads(last: 30) { nodes { comments(last: 10) { nodes { createdAt author { login } } } } }
+    comments(last: 30) { nodes { id url createdAt author { login } } }
+    reviewThreads(last: 30) { nodes { comments(last: 10) { nodes { id url createdAt author { login } } } } }
   } } }
 }`
 
@@ -84,11 +84,11 @@ type reviewNode struct {
 }
 
 type reviewedNode struct {
-	Number                 int
-	Title, URL, HeadRefOid string
-	IsDraft                bool
-	Author                 *struct{ Login string }
-	ReviewRequests         struct {
+	Number                              int
+	Title, URL, HeadRefOid, HeadRefName string
+	IsDraft                             bool
+	Author                              *struct{ Login string }
+	ReviewRequests                      struct {
 		Nodes []struct {
 			RequestedReviewer *struct{ Login string }
 		}
@@ -111,8 +111,8 @@ type reviewedNode struct {
 }
 
 type commentNode struct {
-	CreatedAt string
-	Author    *struct{ Login string }
+	ID, URL, CreatedAt string
+	Author             *struct{ Login string }
 }
 
 type notifications struct {

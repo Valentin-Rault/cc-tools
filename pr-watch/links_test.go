@@ -22,7 +22,7 @@ func TestLinkIndex(t *testing.T) {
 	}, "\n")), 0o644)
 
 	x := newLinkIndex("acme/widgets")
-	links := x.update()
+	links, _ := x.update()
 	if l := links[7]; l.SessionID != "s1" || l.Cwd != "/code/widgets-pr-7" {
 		t.Errorf("link for #7 = %+v", l)
 	}
@@ -37,7 +37,7 @@ func TestLinkIndex(t *testing.T) {
 	other := filepath.Join(project, "s2.jsonl")
 	os.WriteFile(other, []byte(`{"type":"user","cwd":"/code/widgets"}`+"\n"+
 		`{"type":"pr-link","sessionId":"s2","prNumber":7,"prRepository":"acme/widgets","timestamp":"2026-01-02T09:00:00Z"}`+"\n"), 0o644)
-	links = x.update()
+	links, _ = x.update()
 	if l := links[7]; l.SessionID != "s2" || l.Cwd != "/code/widgets" {
 		t.Errorf("latest link for #7 = %+v", l)
 	}
@@ -57,7 +57,7 @@ func TestParseWorktrees(t *testing.T) {
 }
 
 func TestHandoverPrompt(t *testing.T) {
-	p := handover(12, Stored{URL: "https://gh/pr/12", Branch: "feat/x"}, nil)
+	p := handover(12, prInfo{URL: "https://gh/pr/12", Branch: "feat/x"}, nil)
 	for _, want := range []string{"PR #12", "https://gh/pr/12", "feat/x", "gh pr view 12", "[pr-watch event] PR #12: handed to this session", "Never merge"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("handover prompt lacks %q:\n%s", want, p)
@@ -98,5 +98,27 @@ func TestWorktreeFor(t *testing.T) {
 	}
 	if again, err := worktreeFor(clone, "feat/x", 12); err != nil || again != got {
 		t.Errorf("second call should reuse it: %q, %v", again, err)
+	}
+}
+
+// A session that reviews someone else's PR has no pr-link; the PRs its commands and your prompts name stand in.
+func TestMentions(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	project := filepath.Join(dir, "projects", "-code-widgets")
+	os.MkdirAll(project, 0o755)
+	os.WriteFile(filepath.Join(project, "rev.jsonl"), []byte(strings.Join([]string{
+		`{"type":"user","cwd":"/code/widgets","message":{"content":"review https://github.com/acme/widgets/pull/12 please"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh pr view 12 --comments"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh api repos/acme/widgets/pulls/12/comments"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"#12 #13 https://github.com/acme/widgets/pull/13"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"open https://github.com/other/repo/pull/12"}}]}}`,
+	}, "\n")+"\n"), 0o644)
+	_, mentions := newLinkIndex("acme/widgets").update()
+	if m := mentions[12]; len(m) != 1 || m[0].SessionID != "rev" || m[0].Count != 3 || m[0].Cwd != "/code/widgets" {
+		t.Errorf("mentions of #12 = %+v", m)
+	}
+	if _, ok := mentions[13]; ok {
+		t.Error("a PR named only in command output counted")
 	}
 }

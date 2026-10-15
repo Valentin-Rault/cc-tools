@@ -81,7 +81,9 @@ and marks the event *sent* only if `SendMessage` was called with exactly that re
 **Polling.** A conditional request to GitHub's notifications API every `X-Poll-Interval` (a free 304 while
 nothing changed). Your PRs are refreshed with one GraphQL query only when a notification concerns them, a PR is
 queued or has pending CI, you pushed one of their branches (the local `origin/<branch>` refs moved), or a claim
-just came in. Review requests and mentions on other people's PRs show in the *To review* list and as one macOS
+just came in. GitHub doesn't notify you about your own actions, so pr-watch also refreshes every 5 minutes, and
+every minute for 10 minutes after you open a PR from it (`⏎`), when you're likely about to review, merge or comment.
+A refresh costs about 13 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list and as one macOS
 notification each.
 
 **Config** in `~/.config/pr-watch/config.json` (`PR_WATCH_REPO`, `PR_WATCH_REPO_DIR` and `PR_WATCH_IGNORE`

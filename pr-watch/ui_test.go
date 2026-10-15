@@ -281,3 +281,26 @@ func TestReviewedList(t *testing.T) {
 		t.Errorf("⏎ opens %q", got)
 	}
 }
+
+// Opening a PR means you're probably about to act on it, which GitHub won't report: pr-watch watches closely.
+func TestOpeningAPRWatchesClosely(t *testing.T) {
+	m := testModel(t)
+	m.store.write("hot-until", "0")
+	pr := m.prs["2740"]
+	pr.URL = "https://gh/pr/2740"
+	m.prs["2740"] = pr
+	t.Setenv("PATH", t.TempDir()) // no "open" to launch a browser
+	press(m, "enter")
+	if !m.store.HotUntil().After(time.Now()) {
+		t.Error("⏎ didn't switch on hot mode")
+	}
+}
+
+// A highlighted row trades its darkest greys for a lighter one, so it stays readable on the highlight.
+func TestHighlightLiftsDimText(t *testing.T) {
+	row := comment.Render("09:12") + gutter.Render(" │ ") + text.Render("x")
+	got := window([]string{row}, 0, 1, 40, true)[0]
+	if strings.Contains(got, fgParam(commentColor)) || strings.Contains(got, fgParam(gutterColor)) || !strings.Contains(got, fgParam(dark5Color)) {
+		t.Errorf("highlighted row keeps its dim colours: %q", got)
+	}
+}

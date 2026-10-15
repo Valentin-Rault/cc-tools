@@ -16,6 +16,10 @@ import (
 
 const epoch = "Thu, 01 Jan 1970 00:00:00 GMT"
 
+// backgroundRefresh: GitHub doesn't notify you about your own actions (your review, your merge), so pr-watch also
+// refreshes this often whatever happens. One refresh costs about 13 of GraphQL's 5000 points an hour.
+const backgroundRefresh = 5 * time.Minute
+
 // ReviewRequest is someone else's PR waiting for your review.
 type ReviewRequest struct {
 	Number               int
@@ -27,16 +31,17 @@ type ReviewRequest struct {
 
 // Watcher is the poll loop of the old bash poller, one Poll per tick. Only one Poll runs at a time.
 type Watcher struct {
-	cfg      Config
-	store    Store
-	gh       GitHub
-	me       string
-	since    string // notifications updated after this are new (the API's own since= returned hours-old ones)
-	interval time.Duration
-	snap     map[string]Stored // replaced, never mutated, so a PollResult can share it
-	toReview []ReviewRequest
-	reviewed []ReviewedPR
-	notify   func(title, body string)
+	cfg       Config
+	store     Store
+	gh        GitHub
+	me        string
+	since     string // notifications updated after this are new (the API's own since= returned hours-old ones)
+	interval  time.Duration
+	snap      map[string]Stored // replaced, never mutated, so a PollResult can share it
+	refreshed time.Time         // the last successful refresh
+	toReview  []ReviewRequest
+	reviewed  []ReviewedPR
+	notify    func(title, body string)
 }
 
 type PollResult struct {
@@ -72,7 +77,8 @@ func newWatcher(cfg Config, store Store, gh GitHub) (*Watcher, error) {
 func (w *Watcher) Poll(force bool) PollResult {
 	now := time.Now()
 	stamp := now.UTC().Format(time.RFC3339)
-	need := force || w.snap == nil || w.store.exists("retry") || now.Before(w.store.HotUntil()) || busy(w.snap)
+	need := force || w.snap == nil || w.store.exists("retry") || now.Before(w.store.HotUntil()) || busy(w.snap) ||
+		now.Sub(w.refreshed) >= backgroundRefresh
 	if w.pushedRefs() != w.store.read("refs") {
 		w.store.Hot()
 		need = true
@@ -173,6 +179,7 @@ func (w *Watcher) refresh(now time.Time) ([]Event, error) {
 	}
 	w.store.write("refs", w.pushedRefs())
 	w.store.remove("retry")
+	w.refreshed = now
 	owners := w.store.Owners()
 	stamp := now.UTC().Format(time.RFC3339)
 	for _, e := range events {

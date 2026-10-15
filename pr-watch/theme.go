@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"strings"
 
@@ -63,6 +64,15 @@ func onBg(s string, w int, bg color.Color) string {
 	set := ansi.Style{}.BackgroundColor(bg).ForegroundColor(fgColor).String()
 	s = ansi.Truncate(s, w, "…")
 	return set + strings.ReplaceAll(s, "\x1b[m", "\x1b[m"+set) + strings.Repeat(" ", max(0, w-ansi.StringWidth(s))) + "\x1b[m"
+}
+
+// lift brightens the dim colours of a highlighted row, which would be hard to read on its background.
+var lift = strings.NewReplacer(fgParam(commentColor), fgParam(dark5Color), fgParam(gutterColor), fgParam(dark5Color))
+
+// fgParam is how lipgloss writes a true-colour foreground inside an escape sequence.
+func fgParam(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("38;2;%d;%d;%d", r>>8, g>>8, b>>8)
 }
 
 func pad(s string, n int) string { return s + strings.Repeat(" ", max(0, n-lipgloss.Width(s))) }

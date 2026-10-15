@@ -119,7 +119,7 @@ func window(rows []string, sel, n, w int, focused bool) []string {
 	var out []string
 	for i := start; i < min(len(rows), start+n); i++ {
 		if i == sel && focused {
-			out = append(out, onBg(" "+blue.Render("▎")+" "+rows[i], w-2, bgHLColor))
+			out = append(out, onBg(" "+blue.Render("▎")+" "+lift.Replace(rows[i]), w-2, bgHLColor))
 		} else {
 			out = append(out, "   "+rows[i])
 		}
@@ -248,7 +248,7 @@ func (m *model) reviewedRow(r ReviewedPR, w int) string {
 	quiet := !r.NeedsYou()
 	dimIf := func(s lipgloss.Style) lipgloss.Style {
 		if quiet {
-			return comment
+			return faint
 		}
 		return s
 	}
@@ -268,11 +268,11 @@ func (m *model) reviewedRow(r ReviewedPR, w int) string {
 	if r.Comments > 0 {
 		since = append(since, cyan.Render(plural(r.Comments, "comment", "comments")))
 	}
-	sinceText := comment.Render("· nothing new")
+	sinceText := faint.Render("· nothing new")
 	if len(since) > 0 {
 		sinceText = strings.Join(since, gutter.Render(", "))
 	}
-	title := dimIf(text).Render(r.Title)
+	title := map[bool]lipgloss.Style{true: text2, false: text}[quiet].Render(r.Title)
 	if r.Draft {
 		title = faint.Render("draft ") + title
 	}
@@ -334,7 +334,7 @@ func (m *model) eventRow(e Event, w int) string {
 	done := e.Status == Sent
 	dimIf := func(s lipgloss.Style) lipgloss.Style {
 		if done {
-			return comment
+			return faint
 		}
 		return s
 	}

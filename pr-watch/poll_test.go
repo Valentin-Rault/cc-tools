@@ -196,3 +196,17 @@ func TestActivityOnAReviewedPRRefreshes(t *testing.T) {
 		t.Error("a comment on a PR you reviewed didn't refresh")
 	}
 }
+
+// Without any trigger pr-watch doesn't refresh, except every backgroundRefresh, since your own actions send no notification.
+func TestBackgroundRefresh(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	w, _, _ := newTestWatcher(t, store)
+	w.Poll(true)
+	if r := w.Poll(false); r.Refreshed {
+		t.Error("refreshed with nothing to trigger it")
+	}
+	w.refreshed = time.Now().Add(-backgroundRefresh)
+	if r := w.Poll(false); !r.Refreshed {
+		t.Error("no background refresh after", backgroundRefresh)
+	}
+}

@@ -312,6 +312,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	case "enter":
 		if url := m.selectedURL(); url != "" {
 			exec.Command("open", url).Start()
+			// you're likely about to review, merge or comment, and GitHub won't tell pr-watch: watch closely a while
+			m.store.Hot()
 		}
 	case "r":
 		if !m.polling {

@@ -18,18 +18,25 @@ make test
 ## pr-watch
 
 ```
- pr-watch ● watching · next 42s · auto                                              acme/widgets
-
-  My PRs 3 │ To review 1  ←→ ────────────────────────────────────────────────────────────────
- ▸ #2740  draft Project refs               ✓ ⧗ queued              ? suggest feat-refs (o)
-   #2731  Ledger import                    ◐                       ● feat-ledger (linked)
-   #2720  Rollback docs                    ✗ lint, deploy          ● feat-rollback
- ── Events (3) ─────────────────────────────────────────────────────────────────────────────
-   09:15 #2740  review by alice                          → ?              needs owner (o)
-   09:13 #2731  comment by bob                           → feat-ledger    sent ✓
-   09:12 #2720  ci-failed on 3f9a2c1: lint, deploy       → feat-rollback  sent ✓
-  ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events  r refresh  p pause  a auto  q quit
+╭─ My PRs 3  ·  To review 2  ←→ ──────────────────────────────────────────────────────────────────────╮
+│ ▎ #2740  Project refs                 ●━●━●━● queued    ✓ ⧗ queued              ● feat-refs (linked)  │
+│   #2731  Ledger import                ●━●━●─○ approved  ◐                       ● feat-ledger         │
+│   #2720  Rollback docs                ●━◆─○─○ changes   ✗ lint, deploy          ● feat-rollback       │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Events 3  ·  1 waiting ────────────────────────────────────────────────────────────────────────────╮
+│   today ─────────────────────────────────────────────────────────────────────────────────────────── │
+│   09:15 │ ◇ #2740  review by alice                          → ?                needs owner  o       │
+│   09:13 │ ✎ #2731  comment by bob                           → feat-ledger      ✓                    │
+│   09:12 │ ✗ #2720  ci-failed on 3f9a2c1: lint, deploy       → feat-rollback    ✓                    │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events  r refresh  q quit
+ AUTO  ● watching · next 42s   3 open   1 failing   1 queued   2 to review     1 waiting  acme/widgets
 ```
+
+It's drawn in tokyonight night on its own background, like an editor colorscheme, so it needs a terminal with true
+colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks and
+its owner. *To review* shows how long each request has waited and how big it is. The owner picker (`o`) floats over
+the screen.
 
 Keep it open in a zellij tab while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
 the next start it catches up from its last snapshot. `←`/`→` (or `tab`) switch between your PRs and the PRs waiting

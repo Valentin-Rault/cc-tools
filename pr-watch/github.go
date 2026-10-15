@@ -20,14 +20,14 @@ type GitHub interface {
 
 const searchQuery = `query($mine: String!, $review: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
-    number title url isDraft headRefName headRefOid mergeQueueEntry { state }
+    number title url isDraft headRefName headRefOid reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
       ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
     reviews(last: 20) { nodes { id state url author { login } } }
     comments(last: 20) { nodes { id url author { login } } }
   } } }
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
-    number title url isDraft createdAt author { login }
+    number title url isDraft createdAt additions deletions author { login }
   } } }
 }`
 
@@ -43,6 +43,7 @@ type prNode struct {
 	IsDraft         bool
 	HeadRefName     string
 	HeadRefOid      string
+	ReviewDecision  string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or empty
 	MergeQueueEntry *struct{ State string }
 	Commits         struct {
 		Nodes []struct {
@@ -69,6 +70,7 @@ type reviewNode struct {
 	Number                int
 	Title, URL, CreatedAt string
 	IsDraft               bool
+	Additions, Deletions  int
 	Author                *struct{ Login string }
 }
 

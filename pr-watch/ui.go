@@ -12,8 +12,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 var errOwnerGone = errors.New("the owner session isn't running")
@@ -68,6 +66,7 @@ type model struct {
 	ticks                          int
 	err                            error
 	flash                          string
+	flashAt                        time.Time
 	quitArmed                      bool
 
 	list   int  // which PR list is shown: panelMine or panelReview
@@ -143,7 +142,17 @@ func sessionsCmd() tea.Cmd {
 	}
 }
 
+// Update time-stamps each new flash message; the status line shows it for a few seconds.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	before := m.flash
+	next, cmd := m.update(msg)
+	if m.flash != before && m.flash != "" {
+		m.flashAt = time.Now()
+	}
+	return next, cmd
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -682,256 +691,6 @@ func (m *model) suggest(pr int) string {
 	}
 	return found
 }
-
-// ---------------------------------------------------------------- view
-
-var (
-	dim    = lipgloss.NewStyle().Faint(true)
-	bold   = lipgloss.NewStyle().Bold(true)
-	red    = lipgloss.NewStyle().Foreground(lipgloss.Red)
-	green  = lipgloss.NewStyle().Foreground(lipgloss.Green)
-	yellow = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
-	accent = lipgloss.NewStyle().Foreground(lipgloss.Magenta).Bold(true)
-	sel    = lipgloss.NewStyle().Reverse(true)
-)
-
-func (m *model) View() tea.View {
-	w := max(m.width, 40)
-	var lines []string
-	add := func(s string) { lines = append(lines, ansi.Truncate(s, w, "…")) }
-
-	state := green.Render("●") + " watching"
-	switch {
-	case m.paused:
-		state = yellow.Render("⏸") + " paused"
-	case m.polling:
-		state = green.Render("↻") + " checking"
-	case !m.nextPoll.IsZero():
-		state += dim.Render(fmt.Sprintf(" · next %ds", max(0, int(time.Until(m.nextPoll).Seconds()))))
-	}
-	if left := time.Until(m.hotUntil); left > 0 {
-		state += dim.Render(fmt.Sprintf(" · hot %dm", int(left.Minutes())+1))
-	}
-	state += dim.Render(" · ") + map[bool]string{true: "auto", false: yellow.Render("manual")}[m.auto]
-	head := accent.Render("pr-watch") + " " + state
-	add(head + strings.Repeat(" ", max(1, w-lipgloss.Width(head)-len(m.cfg.Repo))) + dim.Render(m.cfg.Repo))
-	switch {
-	case m.err != nil:
-		add(red.Render("! " + strings.ReplaceAll(m.err.Error(), "\n", "; ")))
-	case m.flash != "":
-		add(dim.Render(m.flash))
-	default:
-		add("")
-	}
-
-	// the shown PR list as tabs, then its rows; the events take what's left
-	tabs := []string{fmt.Sprintf(" My PRs %d ", len(m.prs)), fmt.Sprintf(" To review %d ", len(m.toReview))}
-	for i := range tabs {
-		switch {
-		case i == m.list && m.inList:
-			tabs[i] = sel.Render(tabs[i])
-		case i == m.list:
-			tabs[i] = bold.Render(tabs[i])
-		default:
-			tabs[i] = dim.Render(tabs[i])
-		}
-	}
-	bar := tabs[0] + dim.Render("│") + tabs[1] + dim.Render(" ←→")
-	add(bar + " " + dim.Render(strings.Repeat("─", max(0, w-lipgloss.Width(bar)-1))))
-	room := max(6, m.height-5) // header, status, tab bar, events title, footer
-	listRows := min(max(m.rows(m.list), 1), max(3, room*3/5))
-	var rows []string
-	if m.list == panelMine {
-		for _, n := range m.prList() {
-			rows = append(rows, m.prRow(n))
-		}
-		if len(rows) == 0 {
-			rows = []string{dim.Render("no open PRs")}
-		}
-	} else {
-		for _, r := range m.toReview {
-			rows = append(rows, m.reviewRow(r))
-		}
-		if len(rows) == 0 {
-			rows = []string{dim.Render("nothing waiting for your review")}
-		}
-	}
-	lines = append(lines, m.window(m.list, rows, listRows, w)...)
-
-	add(m.title(panelEvents, fmt.Sprintf("Events (%d)", len(m.events)), w))
-	rows = nil
-	for i := range m.events {
-		e, _ := m.shownEvent(i)
-		rows = append(rows, m.eventRow(e))
-	}
-	if len(rows) == 0 {
-		rows = []string{dim.Render("nothing yet: CI failures, reviews and comments on your PRs show up here")}
-	}
-	lines = append(lines, m.window(panelEvents, rows, max(1, room-listRows-1), w)...)
-
-	if m.height > 1 && len(lines) > m.height-1 { // a short terminal: cut the panels, keep the key help
-		lines = lines[:m.height-1]
-	}
-	for len(lines) < m.height-1 {
-		lines = append(lines, "")
-	}
-	add(dim.Render(m.help()))
-
-	content := strings.Join(lines, "\n")
-	if m.picker != nil {
-		content = m.pickerView(w)
-	}
-	v := tea.NewView(content)
-	v.AltScreen = true
-	v.WindowTitle = m.windowTitle()
-	return v
-}
-
-// window renders at most n rows of a panel, scrolled so its cursor stays visible.
-func (m *model) window(panel int, rows []string, n, w int) []string {
-	cur := m.cursor[panel]
-	start := max(0, min(cur-n+1, len(rows)-n))
-	var out []string
-	for i := start; i < min(len(rows), start+n); i++ {
-		mark := "  "
-		if m.panel() == panel && i == cur {
-			mark = sel.Render("▸") + " "
-		}
-		out = append(out, ansi.Truncate(mark+rows[i], w, "…"))
-	}
-	return out
-}
-
-func (m *model) help() string {
-	common := "  r refresh  p pause  a auto  q quit"
-	switch m.panel() {
-	case panelMine:
-		return " ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events" + common
-	case panelReview:
-		return " ←→ lists  ↑↓ move  ⏎ open for review  tab events" + common
-	}
-	return " ↑↓ move  ⏎ open  o owner  s send/resend  g go to owner  tab my PRs" + common
-}
-
-func (m *model) title(panel int, text string, w int) string {
-	t := " " + text + " "
-	if m.panel() == panel {
-		t = sel.Render(t)
-	} else {
-		t = dim.Render(t)
-	}
-	return dim.Render("──") + t + dim.Render(strings.Repeat("─", max(0, w-lipgloss.Width(t)-2)))
-}
-
-func (m *model) prRow(n int) string {
-	s := m.prs[strconv.Itoa(n)]
-	ci := map[string]string{"SUCCESS": green.Render("✓"), "PENDING": yellow.Render("◐"), "EXPECTED": yellow.Render("◐"),
-		"FAILURE": red.Render("✗"), "ERROR": red.Render("✗")}[s.CI]
-	if ci == "" {
-		ci = dim.Render("·")
-	}
-	if len(s.Failing) > 0 {
-		ci += " " + red.Render(ansi.Truncate(strings.Join(s.Failing, ", "), 24, "…"))
-	}
-	if s.Queued {
-		ci += " " + yellow.Render("⧗ queued")
-	}
-	title := s.Title
-	if s.Draft {
-		title = dim.Render("draft ") + title
-	}
-	return fmt.Sprintf("#%-5d %s  %s  %s", n, pad(ansi.Truncate(title, 38, "…"), 38), pad(ci, 30), m.ownerCell(n))
-}
-
-func (m *model) reviewRow(r ReviewRequest) string {
-	title := r.Title
-	if r.Draft {
-		title = dim.Render("draft ") + title
-	}
-	age := ""
-	if !r.Created.IsZero() {
-		age = ago(time.Since(r.Created))
-	}
-	return fmt.Sprintf("#%-5d %s  %s  %s", r.Number, pad(ansi.Truncate(title, 60, "…"), 60), pad(dim.Render("by "+r.Author), 24), dim.Render(age))
-}
-
-func (m *model) ownerCell(pr int) string {
-	owner := m.ownerOf(pr)
-	if owner.Name == "" {
-		if s := m.suggest(pr); s != "" {
-			return yellow.Render("?") + dim.Render(" suggest "+s+" (o)")
-		}
-		return yellow.Render("? no owner (o)")
-	}
-	_, explicit := m.owners[pr]
-	linked := map[bool]string{true: "", false: dim.Render(" (linked)")}[explicit]
-	if s, ok := resolve(m.sessions, owner); ok {
-		return green.Render("●") + " " + s.Name + linked
-	}
-	if m.sessions == nil { // not listed yet
-		return dim.Render("● " + owner.Name)
-	}
-	return red.Render("○") + " " + owner.Name + dim.Render(" (not running)")
-}
-
-func (m *model) eventRow(e Event) string {
-	text, _ := splitURL(e.Text)
-	status := map[Status]string{
-		NeedsOwner: yellow.Render("needs owner (o)"), Waiting: yellow.Render("waiting (s)"),
-		OwnerGone: red.Render("owner gone (o)"), Sending: yellow.Render("sending…"),
-		Sent: green.Render("sent ✓"), Failed: red.Render("failed (s)"),
-	}[e.Status]
-	to := cmp.Or(e.Owner, m.ownerOf(e.PR).Name, "?")
-	line := fmt.Sprintf("%s #%-5d %s  %s  %s", dim.Render(e.At.Local().Format("15:04")), e.PR,
-		pad(ansi.Truncate(text, 46, "…"), 46), pad(dim.Render("→ ")+ansi.Truncate(to, 22, "…"), 24), status)
-	if e.Note != "" {
-		line += dim.Render("  " + e.Note)
-	}
-	return line
-}
-
-func (m *model) pickerView(w int) string {
-	p := m.picker
-	s := m.prs[strconv.Itoa(p.pr)]
-	lines := []string{
-		accent.Render("Who owns #"+strconv.Itoa(p.pr)+"?") + " " + s.Title,
-		dim.Render("branch " + s.Branch + " · ⏎ choose · esc cancel · its waiting events go to the one you pick"),
-		"",
-	}
-	if len(p.choices) == 0 {
-		lines = append(lines, red.Render("no running Claude sessions, and no repo_dir configured to start one"))
-	}
-	for i, c := range p.choices {
-		mark := "  "
-		if i == p.cursor {
-			mark = sel.Render("▸") + " "
-		}
-		label := c.label
-		if c.kind != chooseSession {
-			label = accent.Render(label)
-		}
-		lines = append(lines, ansi.Truncate(mark+pad(label, 42)+dim.Render(c.note), w, "…"))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m *model) windowTitle() string {
-	waiting := 0
-	for _, e := range m.events {
-		if e.Status != Sent && e.Status != Sending {
-			waiting++
-		}
-	}
-	if m.paused {
-		return "pr-watch ⏸"
-	}
-	if waiting > 0 {
-		return fmt.Sprintf("pr-watch ● %d waiting", waiting)
-	}
-	return "pr-watch"
-}
-
-func pad(s string, n int) string { return s + strings.Repeat(" ", max(0, n-lipgloss.Width(s))) }
 
 // splitURL separates the trailing URL that every event text ends with.
 func splitURL(text string) (rest, url string) {

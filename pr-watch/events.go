@@ -14,6 +14,7 @@ type PR struct {
 	Number                   int
 	Title, URL, Branch, Head string
 	Draft, Queued            bool
+	Review                   string   // GitHub's review decision: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or empty
 	CI                       string   // rollup state: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED, or NONE without checks
 	Failing                  []string // names of the failed checks
 	Items                    []Item   // reviews and comments by other people
@@ -32,6 +33,7 @@ type Stored struct {
 	Title   string   `json:"title,omitempty"`
 	URL     string   `json:"url,omitempty"`
 	Draft   bool     `json:"draft,omitempty"`
+	Review  string   `json:"review,omitempty"`
 	Failing []string `json:"failing,omitempty"`
 }
 
@@ -67,7 +69,7 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 			continue
 		}
 		p := PR{Number: n.Number, Title: n.Title, URL: n.URL, Branch: n.HeadRefName, Head: n.HeadRefOid,
-			Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, CI: "NONE"}
+			Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
 		if len(n.Commits.Nodes) > 0 {
 			if ci := n.Commits.Nodes[0].Commit.StatusCheckRollup; ci != nil {
 				p.CI = ci.State
@@ -135,7 +137,7 @@ func snapshot(prs []PR) map[string]Stored {
 			seen = append(seen, it.ID)
 		}
 		snap[strconv.Itoa(p.Number)] = Stored{Branch: p.Branch, Head: p.Head, CI: p.CI, Queued: p.Queued, Seen: seen,
-			Title: p.Title, URL: p.URL, Draft: p.Draft, Failing: p.Failing}
+			Title: p.Title, URL: p.URL, Draft: p.Draft, Review: p.Review, Failing: p.Failing}
 	}
 	return snap
 }

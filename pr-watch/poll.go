@@ -18,10 +18,11 @@ const epoch = "Thu, 01 Jan 1970 00:00:00 GMT"
 
 // ReviewRequest is someone else's PR waiting for your review.
 type ReviewRequest struct {
-	Number             int
-	Title, URL, Author string
-	Draft              bool
-	Created            time.Time
+	Number               int
+	Title, URL, Author   string
+	Draft                bool
+	Created              time.Time
+	Additions, Deletions int
 }
 
 // Watcher is the poll loop of the old bash poller, one Poll per tick. Only one Poll runs at a time.
@@ -156,7 +157,8 @@ func (w *Watcher) refresh(now time.Time) ([]Event, error) {
 	w.toReview = nil
 	for _, n := range d.Review.Nodes {
 		if n.Number != 0 {
-			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft}
+			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
+				Additions: n.Additions, Deletions: n.Deletions}
 			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)
 			if n.Author != nil {
 				r.Author = n.Author.Login

@@ -18,8 +18,8 @@ func testModel(t *testing.T) *model {
 	store.Claim(Owner{"feat-ledger", "id-gone"}, []int{2731})
 	m := newModel(Config{Repo: "acme/widgets"}, store, &Watcher{}, nil)
 	m.prs = map[string]Stored{
-		"2720": {Title: "Rollback docs for the deploy pipeline", CI: "FAILURE", Failing: []string{"lint", "deploy"}, Branch: "rb"},
-		"2731": {Title: "Ledger import", CI: "PENDING", Branch: "ledger"},
+		"2720": {Title: "Rollback docs for the deploy pipeline", CI: "FAILURE", Failing: []string{"lint", "deploy"}, Branch: "rb", Review: "CHANGES_REQUESTED"},
+		"2731": {Title: "Ledger import", CI: "PENDING", Branch: "ledger", Review: "APPROVED"},
 		"2740": {Title: "Project refs", CI: "SUCCESS", Queued: true, Branch: "refs", Draft: true},
 	}
 	m.sessions = []Session{{Name: "feat-rollback", SessionID: "id-1"}, {Name: "feat-refs", SessionID: "id-3", Branch: "refs"}}
@@ -29,7 +29,8 @@ func testModel(t *testing.T) *model {
 		{At: at, PR: 2731, Text: "comment by bob https://gh/pr/2731#c1", Status: OwnerGone, Owner: "feat-ledger"},
 		{At: at, PR: 2740, Text: "review by alice https://gh/pr/2740#r1", Status: NeedsOwner},
 	}
-	m.toReview = []ReviewRequest{{Number: 2711, Title: "Add reconciliation", Author: "bob", URL: "https://gh/pr/2711"}}
+	m.toReview = []ReviewRequest{{Number: 2711, Title: "Add reconciliation", Author: "bob", URL: "https://gh/pr/2711",
+		Created: time.Now().Add(-50 * time.Hour), Additions: 412, Deletions: 38}}
 	m.nextPoll = time.Now().Add(42 * time.Second)
 	return m
 }
@@ -61,7 +62,8 @@ func TestView(t *testing.T) {
 			continue
 		}
 		for _, want := range []string{"My PRs 3", "To review 1", "● feat-rollback", "○ feat-ledger (not running)",
-			"suggest feat-refs", "✗ lint, deploy", "⧗ queued", "needs owner", "owner gone", "sent ✓", "next 4"} {
+			"suggest feat-refs", "✗ lint, deploy", "⧗ queued", "needs owner", "owner gone", "→ feat-rollback", "next 4",
+			"●─○─○─○ draft", "●━◆─○─○ changes", "●━●━●─○ approved", " AUTO ", "3 open", "1 failing", "2 waiting"} {
 			if !strings.Contains(view, want) {
 				t.Errorf("view lacks %q:\n%s", want, view)
 			}
@@ -209,3 +211,48 @@ func TestNameOnlyClaimsGetPinnedToTheSession(t *testing.T) {
 }
 
 var _ tea.Model = (*model)(nil)
+
+func TestReviewRowsShowAgeAndSize(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 120, 24
+	press(m, "right")
+	v := screen(m)
+	for _, want := range []string{"#2711", "bob", "2d", "+412 −38", "▰▰▰▱▱"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("review list lacks %q:\n%s", want, v)
+		}
+	}
+}
+
+// The owner picker floats over the dimmed screen: the PR list stays visible behind it.
+func TestPickerFloatsOverTheList(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 120, 24
+	m.openPicker(2740)
+	v := screen(m)
+	for _, want := range []string{"Who owns #2740?", "feat-refs", "has this branch checked out", "#2731", "↑↓ move  ⏎ choose"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("picker screen lacks %q:\n%s", want, v)
+		}
+	}
+	if got := strings.Count(v, "\n") + 1; got != 24 {
+		t.Errorf("picker screen has %d lines", got)
+	}
+}
+
+func TestRail(t *testing.T) {
+	for _, c := range []struct {
+		s    Stored
+		want string
+	}{
+		{Stored{Draft: true}, "●─○─○─○ draft"},
+		{Stored{}, "●━●─○─○ review"},
+		{Stored{Review: "CHANGES_REQUESTED"}, "●━◆─○─○ changes"},
+		{Stored{Review: "APPROVED"}, "●━●━●─○ approved"},
+		{Stored{Review: "APPROVED", Queued: true}, "●━●━●━● queued"},
+	} {
+		if got := ansi.Strip(rail(c.s)); got != c.want {
+			t.Errorf("rail(%+v) = %q, want %q", c.s, got, c.want)
+		}
+	}
+}

@@ -43,8 +43,8 @@ your threads, comments), the ones that need you again first; `⏎` there opens o
 PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen.
 
 Keep it open in a zellij tab while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
-the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` goes through them
-and the events, and `⏎` opens the selected PR in the browser.
+the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the
+list and the events, and `⏎` opens the selected PR in the browser.
 
 **Who owns a PR.** Claude Code records in a session's transcript which PR the session's branch belongs to
 (`"type":"pr-link"` lines; `claude --from-pr` uses them too). pr-watch reads those, so a PR's events go to the running

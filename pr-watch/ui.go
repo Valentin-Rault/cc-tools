@@ -308,10 +308,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		} else {
 			m.focus(min(panelReviewed, m.list+1))
 		}
-	case "tab":
-		m.focus((m.panel() + 1) % 4)
-	case "shift+tab":
-		m.focus((m.panel() + 3) % 4)
+	case "tab", "shift+tab": // between the list and the events; ←→ pick the list
+		if m.inList {
+			m.focus(panelEvents)
+		} else {
+			m.focus(m.list)
+		}
 	case "up", "k":
 		m.cursor[m.panel()] = max(0, m.cursor[m.panel()]-1)
 	case "down", "j":

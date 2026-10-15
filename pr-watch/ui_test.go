@@ -90,12 +90,14 @@ func TestArrowsAndTabSwapTheLists(t *testing.T) {
 	if v := screen(m); !strings.Contains(v, "Rollback docs") {
 		t.Errorf("← should show my PRs:\n%s", v)
 	}
-	for _, want := range []int{panelReview, panelReviewed, panelEvents, panelMine} {
+	press(m, "right")
+	for _, want := range []int{panelEvents, panelReview, panelEvents, panelReview} { // tab only goes between the two panes
 		press(m, "tab")
 		if m.panel() != want {
 			t.Errorf("tab: panel %d, want %d", m.panel(), want)
 		}
 	}
+	press(m, "left")
 	press(m, "right", "right", "right")
 	if m.panel() != panelReviewed {
 		t.Errorf("→ stops at the last list: panel %d", m.panel())

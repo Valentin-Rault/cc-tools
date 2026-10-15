@@ -485,13 +485,13 @@ func (m *model) help() string {
 	case m.picker != nil:
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	case m.panel() == panelMine:
-		return " ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab next" + common
+		return " ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events" + common
 	case m.panel() == panelReview:
-		return " ←→ lists  ↑↓ move  ⏎ open for review  tab next" + common
+		return " ←→ lists  ↑↓ move  ⏎ open for review  tab events" + common
 	case m.panel() == panelReviewed:
-		return " ←→ lists  ↑↓ move  ⏎ open what changed since your review  tab next" + common
+		return " ←→ lists  ↑↓ move  ⏎ open what changed since your review  tab events" + common
 	}
-	return " ↑↓ move  ⏎ open  o owner  s send/resend  g go to owner  tab my PRs" + common
+	return " ↑↓ move  ⏎ open  o owner  s send/resend  g go to owner  tab list" + common
 }
 
 func (m *model) waiting() int {

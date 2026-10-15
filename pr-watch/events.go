@@ -81,12 +81,8 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 			}
 		}
 		other := func(it itemNode) (Item, bool) {
-			who := "ghost"
-			if it.Author != nil {
-				who = it.Author.Login
-			}
-			ignored := strings.EqualFold(who, me) || slices.ContainsFunc(ignore, func(s string) bool { return strings.EqualFold(s, who) })
-			return Item{ID: it.ID, URL: it.URL, Who: who}, !ignored
+			who := login(it.Author)
+			return Item{ID: it.ID, URL: it.URL, Who: who}, !ignored(who, me, ignore)
 		}
 		for _, r := range n.Reviews.Nodes {
 			if it, ok := other(r); ok {
@@ -140,4 +136,16 @@ func snapshot(prs []PR) map[string]Stored {
 			Title: p.Title, URL: p.URL, Draft: p.Draft, Review: p.Review, Failing: p.Failing}
 	}
 	return snap
+}
+
+func login(a *struct{ Login string }) string {
+	if a == nil {
+		return "ghost"
+	}
+	return a.Login
+}
+
+// ignored: your own activity and the bots in the config never need action.
+func ignored(who, me string, ignore []string) bool {
+	return strings.EqualFold(who, me) || slices.ContainsFunc(ignore, func(s string) bool { return strings.EqualFold(s, who) })
 }

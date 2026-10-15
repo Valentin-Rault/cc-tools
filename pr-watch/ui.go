@@ -39,10 +39,11 @@ type (
 	jumpMsg struct{ err error }
 )
 
-// The three panels: the top area shows one of the two PR lists, the events panel sits below it.
+// The panels: the top area shows one of the three PR lists, the events panel sits below it.
 const (
 	panelMine = iota
 	panelReview
+	panelReviewed
 	panelEvents
 )
 
@@ -55,6 +56,7 @@ type model struct {
 
 	prs      map[string]Stored
 	toReview []ReviewRequest
+	reviewed []ReviewedPR
 	events   []Event // oldest first
 	owners   map[int]Owner
 	links    map[int]prLink
@@ -71,7 +73,7 @@ type model struct {
 
 	list   int  // which PR list is shown: panelMine or panelReview
 	inList bool // focus is on that list, not on the events
-	cursor [3]int
+	cursor [4]int
 	picker *picker
 	width  int
 	height int
@@ -113,7 +115,7 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 
 func (m *model) Init() tea.Cmd {
 	m.polling, m.linking = true, true
-	return tea.Batch(m.pollCmd(false), tick(), sessionsCmd(), m.linksCmd())
+	return tea.Batch(m.pollCmd(true), tick(), sessionsCmd(), m.linksCmd()) // refresh at once: the lists start empty
 }
 
 func (m *model) pollCmd(force bool) tea.Cmd {
@@ -165,7 +167,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prs = msg.PRs
 		}
 		if msg.Refreshed {
-			m.toReview = msg.ToReview
+			m.toReview, m.reviewed = msg.ToReview, msg.Reviewed
 		}
 		m.dropEvents(func(e Event) bool { return slices.Contains(msg.Closed, e.PR) })
 		m.events = append(m.events, msg.Events...)
@@ -291,14 +293,18 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 		m.savePending()
 		return m, tea.Quit
-	case "left", "h":
-		m.focus(panelMine)
-	case "right", "l":
-		m.focus(panelReview)
+	case "left", "h", "right", "l":
+		if !m.inList { // from the events, back to the list they sit under
+			m.focus(m.list)
+		} else if k == "left" || k == "h" {
+			m.focus(max(panelMine, m.list-1))
+		} else {
+			m.focus(min(panelReviewed, m.list+1))
+		}
 	case "tab":
-		m.focus((m.panel() + 1) % 3)
+		m.focus((m.panel() + 1) % 4)
 	case "shift+tab":
-		m.focus((m.panel() + 2) % 3)
+		m.focus((m.panel() + 3) % 4)
 	case "up", "k":
 		m.cursor[m.panel()] = max(0, m.cursor[m.panel()]-1)
 	case "down", "j":
@@ -625,7 +631,7 @@ func (m *model) prList() []int {
 }
 
 func (m *model) rows(panel int) int {
-	return [3]int{len(m.prs), len(m.toReview), len(m.events)}[panel]
+	return [4]int{len(m.prs), len(m.toReview), len(m.reviewed), len(m.events)}[panel]
 }
 
 // shownEvent is the events panel's order: newest first.
@@ -656,6 +662,11 @@ func (m *model) selectedURL() string {
 	case panelReview:
 		if i := m.cursor[panelReview]; i < len(m.toReview) {
 			return m.toReview[i].URL
+		}
+		return ""
+	case panelReviewed:
+		if i := m.cursor[panelReviewed]; i < len(m.reviewed) {
+			return m.reviewed[i].changesURL()
 		}
 		return ""
 	case panelEvents:

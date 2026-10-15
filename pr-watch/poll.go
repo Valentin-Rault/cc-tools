@@ -35,12 +35,14 @@ type Watcher struct {
 	interval time.Duration
 	snap     map[string]Stored // replaced, never mutated, so a PollResult can share it
 	toReview []ReviewRequest
+	reviewed []ReviewedPR
 	notify   func(title, body string)
 }
 
 type PollResult struct {
 	PRs       map[string]Stored
 	ToReview  []ReviewRequest
+	Reviewed  []ReviewedPR
 	Events    []Event
 	Interval  time.Duration // GitHub's X-Poll-Interval
 	Refreshed bool
@@ -108,7 +110,7 @@ func (w *Watcher) Poll(force bool) PollResult {
 		}
 		errs = append(errs, err)
 	}
-	r.PRs, r.ToReview, r.Err = w.snap, w.toReview, errors.Join(errs...)
+	r.PRs, r.ToReview, r.Reviewed, r.Err = w.snap, w.toReview, w.reviewed, errors.Join(errs...)
 	return r
 }
 
@@ -121,7 +123,8 @@ func (w *Watcher) readNotifications(items []notification, stamp string) (need bo
 		}
 		pr := path.Base(it.Subject.URL)
 		_, mine := w.snap[pr]
-		if mine || it.Reason == "author" || it.Reason == "ci_activity" || it.Reason == "review_requested" {
+		reviewing := slices.ContainsFunc(w.reviewed, func(r ReviewedPR) bool { return strconv.Itoa(r.Number) == pr })
+		if mine || reviewing || it.Reason == "author" || it.Reason == "ci_activity" || it.Reason == "review_requested" {
 			need = true
 		}
 		if mine || it.Subject.Type != "PullRequest" || !slices.Contains([]string{"review_requested", "mention", "team_mention"}, it.Reason) {
@@ -139,7 +142,7 @@ func (w *Watcher) readNotifications(items []notification, stamp string) (need bo
 }
 
 func (w *Watcher) refresh(now time.Time) ([]Event, error) {
-	d, err := w.gh.Search(w.cfg.Repo)
+	d, err := w.gh.Search(w.cfg.Repo, w.me)
 	if err != nil {
 		w.store.write("retry", "")
 		return nil, fmt.Errorf("refresh: %w", err)
@@ -154,9 +157,11 @@ func (w *Watcher) refresh(now time.Time) ([]Event, error) {
 		return nil, fmt.Errorf("saving the snapshot: %w", err)
 	}
 	w.snap = snap
+	w.reviewed = reviewedPRs(d.Reviewed.Nodes, w.me, w.cfg.Ignore)
 	w.toReview = nil
 	for _, n := range d.Review.Nodes {
-		if n.Number != 0 {
+		// a PR you already reviewed and are asked to look at again shows under Reviewed, not twice
+		if n.Number != 0 && !slices.ContainsFunc(w.reviewed, func(r ReviewedPR) bool { return r.Number == n.Number }) {
 			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
 				Additions: n.Additions, Deletions: n.Deletions}
 			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)

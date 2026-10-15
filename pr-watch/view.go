@@ -42,11 +42,16 @@ func (m *model) body(w, h int) []string {
 			rows = append(rows, m.prRow(n, w-6))
 		}
 		empty = "no open PRs"
-	} else {
+	} else if m.list == panelReview {
 		for _, r := range m.toReview {
 			rows = append(rows, m.reviewRow(r, w-6))
 		}
 		empty = "nothing waiting for your review"
+	} else {
+		for _, r := range m.reviewed {
+			rows = append(rows, m.reviewedRow(r, w-6))
+		}
+		empty = "you haven't reviewed any open PR"
 	}
 	listH := min(max(len(rows), 1), max(3, h*3/5-2)) + 2
 	var inner []string
@@ -82,8 +87,9 @@ func (m *model) listTitle() string {
 		}
 		return comment.Render(label)
 	}
-	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs))) + gutter.Render("  ·  ") +
-		tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview))) + comment.Render("  ←→")
+	sep := gutter.Render("  ·  ")
+	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs))) + sep + tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview))) +
+		sep + tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed))) + comment.Render("  ←→")
 }
 
 // frame draws a rounded frame of w×h around lines, with the title in its top border. Focused frames are blue.
@@ -227,6 +233,61 @@ func sizeBar(lines int) string {
 	return blue.Render(strings.Repeat("▰", k)) + gutter.Render(strings.Repeat("▱", 5-k))
 }
 
+var verdicts = map[string]struct {
+	glyph, label string
+	style        lipgloss.Style
+}{
+	"APPROVED": {"✓", "approved", green}, "CHANGES_REQUESTED": {"◆", "changes requested", orange},
+	"COMMENTED": {"◇", "commented", blue}, "DISMISSED": {"·", "dismissed", comment},
+}
+
+// reviewedRow: your verdict, what happened since your review, and when you reviewed. One with nothing new fades.
+func (m *model) reviewedRow(r ReviewedPR, w int) string {
+	const authorW, verdictW, sinceW, whenW = 12, 20, 44, 4
+	titleW := max(16, w-7-2-authorW-2-verdictW-2-sinceW-2-whenW)
+	quiet := !r.NeedsYou()
+	dimIf := func(s lipgloss.Style) lipgloss.Style {
+		if quiet {
+			return comment
+		}
+		return s
+	}
+	v := verdicts[r.Verdict]
+	var since []string
+	if r.AskedAgain {
+		since = append(since, yellow.Render("↻ asked again"))
+	}
+	if r.NewCommits > 0 {
+		since = append(since, yellow.Render("● "+plural(r.NewCommits, "new commit", "new commits")))
+	} else if r.NewCommits < 0 {
+		since = append(since, yellow.Render("● rebased"))
+	}
+	if r.Replies > 0 {
+		since = append(since, cyan.Render(plural(r.Replies, "reply", "replies")))
+	}
+	if r.Comments > 0 {
+		since = append(since, cyan.Render(plural(r.Comments, "comment", "comments")))
+	}
+	sinceText := comment.Render("· nothing new")
+	if len(since) > 0 {
+		sinceText = strings.Join(since, gutter.Render(", "))
+	}
+	title := dimIf(text).Render(r.Title)
+	if r.Draft {
+		title = faint.Render("draft ") + title
+	}
+	return dimIf(text).Render(fmt.Sprintf("#%-6d", r.Number)) + cell(title, titleW) + "  " + cell(dimIf(text2).Render(r.Author), authorW) +
+		"  " + cell(v.style.Render(v.glyph)+" "+dimIf(v.style).Render(v.label), verdictW) + "  " + cell(sinceText, sinceW) +
+		"  " + comment.Render(ago(time.Since(r.ReviewedAt)))
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
+}
+
 var kinds = map[string]struct {
 	glyph string
 	style lipgloss.Style
@@ -336,8 +397,14 @@ func (m *model) statusLine(w int) string {
 		count := func(n int, c lipgloss.Style, label string) string {
 			return bar.Inherit(c).Bold(true).Render(strconv.Itoa(n)) + bar.Render(label)
 		}
+		again := 0
+		for _, r := range m.reviewed {
+			if r.NeedsYou() {
+				again++
+			}
+		}
 		middle = bar.Render("  ") + count(len(m.prs), text, " open   ") + count(failing, red, " failing   ") +
-			count(queued, cyan, " queued   ") + count(len(m.toReview), blue, " to review")
+			count(queued, cyan, " queued   ") + count(len(m.toReview), blue, " to review   ") + count(again, fg(magentaColor), " to re-review")
 	}
 
 	right := segment.Render(" " + m.cfg.Repo + " ")
@@ -398,9 +465,11 @@ func (m *model) help() string {
 	case m.picker != nil:
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	case m.panel() == panelMine:
-		return " ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events" + common
+		return " ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab next" + common
 	case m.panel() == panelReview:
-		return " ←→ lists  ↑↓ move  ⏎ open for review  tab events" + common
+		return " ←→ lists  ↑↓ move  ⏎ open for review  tab next" + common
+	case m.panel() == panelReviewed:
+		return " ←→ lists  ↑↓ move  ⏎ open what changed since your review  tab next" + common
 	}
 	return " ↑↓ move  ⏎ open  o owner  s send/resend  g go to owner  tab my PRs" + common
 }

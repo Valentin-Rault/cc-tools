@@ -90,18 +90,21 @@ func TestArrowsAndTabSwapTheLists(t *testing.T) {
 	if v := screen(m); !strings.Contains(v, "Rollback docs") {
 		t.Errorf("← should show my PRs:\n%s", v)
 	}
-	press(m, "tab")
-	if m.panel() != panelReview {
-		t.Errorf("tab from my PRs: panel %d", m.panel())
+	for _, want := range []int{panelReview, panelReviewed, panelEvents, panelMine} {
+		press(m, "tab")
+		if m.panel() != want {
+			t.Errorf("tab: panel %d, want %d", m.panel(), want)
+		}
 	}
-	press(m, "tab")
-	if m.panel() != panelEvents || m.list != panelReview {
-		t.Errorf("tab from review: panel %d, list %d", m.panel(), m.list)
+	press(m, "right", "right", "right")
+	if m.panel() != panelReviewed {
+		t.Errorf("→ stops at the last list: panel %d", m.panel())
 	}
-	press(m, "tab")
-	if m.panel() != panelMine {
-		t.Errorf("tab from events: panel %d", m.panel())
+	press(m, "tab", "left")
+	if m.panel() != panelReviewed {
+		t.Errorf("← from the events goes back to their list: panel %d", m.panel())
 	}
+	press(m, "left", "left")
 	press(m, "right", "o")
 	if m.picker != nil {
 		t.Error("o on someone else's PR opened the owner picker")
@@ -254,5 +257,27 @@ func TestRail(t *testing.T) {
 		if got := ansi.Strip(rail(c.s)); got != c.want {
 			t.Errorf("rail(%+v) = %q, want %q", c.s, got, c.want)
 		}
+	}
+}
+
+func TestReviewedList(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 130, 24
+	m.reviewed = []ReviewedPR{
+		{Number: 2744, Title: "Skip the metadata probe", URL: "https://gh/pr/2744", Author: "frank", Verdict: "APPROVED",
+			ReviewedAt: time.Now().Add(-26 * time.Hour), ReviewedOid: "b", HeadOid: "d", NewCommits: 2, Replies: 1, AskedAgain: true},
+		{Number: 2671, Title: "Drop the CSV export", URL: "https://gh/pr/2671", Author: "dave", Verdict: "CHANGES_REQUESTED",
+			ReviewedAt: time.Now().Add(-80 * time.Hour)},
+	}
+	press(m, "right", "right")
+	v := screen(m)
+	for _, want := range []string{"Reviewed 2", "#2744", "frank", "✓ approved", "↻ asked again, ● 2 new commits, 1 reply", "26h",
+		"◆ changes requested", "· nothing new", "3d", "1 to re-review", "⏎ open what changed since your review"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("reviewed list lacks %q:\n%s", want, v)
+		}
+	}
+	if got := m.selectedURL(); got != "https://gh/pr/2744/files/b..d" {
+		t.Errorf("⏎ opens %q", got)
 	}
 }

@@ -14,11 +14,11 @@ import (
 // GitHub is what the watcher needs from the API; tests swap in a fake.
 type GitHub interface {
 	Login() (string, error)
-	Search(repo string) (*searchData, error)
+	Search(repo, me string) (*searchData, error)
 	Notifications(repo, lastModified string) (*notifications, error)
 }
 
-const searchQuery = `query($mine: String!, $review: String!) {
+const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
     number title url isDraft headRefName headRefOid reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
@@ -29,11 +29,20 @@ const searchQuery = `query($mine: String!, $review: String!) {
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     number title url isDraft createdAt additions deletions author { login }
   } } }
+  reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
+    number title url isDraft headRefOid author { login }
+    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
+    reviews(last: 10, author: $me) { nodes { state submittedAt commit { oid } } }
+    commits(last: 50) { nodes { commit { oid } } }
+    comments(last: 30) { nodes { createdAt author { login } } }
+    reviewThreads(last: 30) { nodes { comments(last: 10) { nodes { createdAt author { login } } } } }
+  } } }
 }`
 
 type searchData struct {
-	Mine   struct{ Nodes []prNode }     `json:"mine"`
-	Review struct{ Nodes []reviewNode } `json:"review"`
+	Mine     struct{ Nodes []prNode }       `json:"mine"`
+	Review   struct{ Nodes []reviewNode }   `json:"review"`
+	Reviewed struct{ Nodes []reviewedNode } `json:"reviewed"`
 }
 
 type prNode struct {
@@ -72,6 +81,38 @@ type reviewNode struct {
 	IsDraft               bool
 	Additions, Deletions  int
 	Author                *struct{ Login string }
+}
+
+type reviewedNode struct {
+	Number                 int
+	Title, URL, HeadRefOid string
+	IsDraft                bool
+	Author                 *struct{ Login string }
+	ReviewRequests         struct {
+		Nodes []struct {
+			RequestedReviewer *struct{ Login string }
+		}
+	}
+	Reviews struct {
+		Nodes []struct {
+			State, SubmittedAt string
+			Commit             *struct{ Oid string }
+		}
+	}
+	Commits struct {
+		Nodes []struct{ Commit struct{ Oid string } }
+	}
+	Comments      struct{ Nodes []commentNode }
+	ReviewThreads struct {
+		Nodes []struct {
+			Comments struct{ Nodes []commentNode }
+		}
+	}
+}
+
+type commentNode struct {
+	CreatedAt string
+	Author    *struct{ Login string }
 }
 
 type notifications struct {
@@ -118,11 +159,13 @@ func (c *ghClient) Login() (string, error) {
 	return u.Login, err
 }
 
-func (c *ghClient) Search(repo string) (*searchData, error) {
+func (c *ghClient) Search(repo, me string) (*searchData, error) {
 	var d searchData
 	err := c.gql.Do(searchQuery, map[string]any{
-		"mine":   "repo:" + repo + " is:pr is:open author:@me",
-		"review": "repo:" + repo + " is:pr is:open review-requested:@me",
+		"mine":     "repo:" + repo + " is:pr is:open author:@me",
+		"review":   "repo:" + repo + " is:pr is:open review-requested:@me",
+		"reviewed": "repo:" + repo + " is:pr is:open reviewed-by:@me -author:@me sort:updated-desc",
+		"me":       me,
 	}, &d)
 	return &d, err
 }

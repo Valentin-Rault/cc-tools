@@ -18,7 +18,7 @@ make test
 ## pr-watch
 
 ```
-╭─ My PRs 3  ·  To review 2  ←→ ──────────────────────────────────────────────────────────────────────╮
+╭─ My PRs 3  ·  To review 2  ·  Reviewed 1  ←→ ───────────────────────────────────────────────────────╮
 │ ▎ #2740  Project refs                 ●━●━●━● queued    ✓ ⧗ queued              ● feat-refs (linked)  │
 │   #2731  Ledger import                ●━●━●─○ approved  ◐                       ● feat-ledger         │
 │   #2720  Rollback docs                ●━◆─○─○ changes   ✗ lint, deploy          ● feat-rollback       │
@@ -35,12 +35,14 @@ make test
 
 It's drawn in tokyonight night on its own background, like an editor colorscheme, so it needs a terminal with true
 colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks and
-its owner. *To review* shows how long each request has waited and how big it is. The owner picker (`o`) floats over
-the screen.
+its owner. *To review* shows how long each request has waited and how big it is. *Reviewed* lists the open PRs
+of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in
+your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review. A
+PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen.
 
 Keep it open in a zellij tab while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
-the next start it catches up from its last snapshot. `←`/`→` (or `tab`) switch between your PRs and the PRs waiting
-for your review; `⏎` opens the selected one in the browser.
+the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` goes through them
+and the events, and `⏎` opens the selected PR in the browser.
 
 **Who owns a PR.** Claude Code records in a session's transcript which PR the session's branch belongs to
 (`"type":"pr-link"` lines; `claude --from-pr` uses them too). pr-watch reads those, so a PR's events go to the running

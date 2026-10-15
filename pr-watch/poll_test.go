@@ -19,7 +19,7 @@ type fakeGitHub struct {
 
 func (f *fakeGitHub) Login() (string, error) { return "me", nil }
 
-func (f *fakeGitHub) Search(string) (*searchData, error) {
+func (f *fakeGitHub) Search(string, string) (*searchData, error) {
 	if f.search == nil {
 		return nil, errors.New("search failed")
 	}
@@ -49,7 +49,10 @@ const fixture = `{"mine": {"nodes": [
    "reviews": {"nodes": [{"id": "R9", "state": "COMMENTED", "url": "u/R9", "author": {"login": "review-bot"}}]},
    "comments": {"nodes": []}},
   {}]},
- "review": {"nodes": [{"number": 7, "title": "Their change", "url": "https://gh/pr/7", "author": {"login": "erin"}}]}}`
+ "review": {"nodes": [{"number": 7, "title": "Their change", "url": "https://gh/pr/7", "author": {"login": "erin"}},
+   {"number": 8, "title": "Asked again", "url": "https://gh/pr/8", "author": {"login": "frank"}}]},
+ "reviewed": {"nodes": [{"number": 8, "title": "Asked again", "url": "https://gh/pr/8", "headRefOid": "h8", "author": {"login": "frank"},
+   "reviews": {"nodes": [{"state": "APPROVED", "submittedAt": "2026-01-02T10:00:00Z", "commit": {"oid": "h8"}}]}}]}}`
 
 // newTestWatcher watches the fixture; store may already hold state from a previous run.
 func newTestWatcher(t *testing.T, store Store) (*Watcher, *fakeGitHub, *[]string) {
@@ -111,7 +114,10 @@ func TestPollEventsAgainstSnapshot(t *testing.T) {
 		t.Errorf("pinged for a notification older than its start: %q", *notified)
 	}
 	if len(r.ToReview) != 1 || r.ToReview[0].Author != "erin" {
-		t.Errorf("review requests = %+v", r.ToReview)
+		t.Errorf("review requests = %+v; #8 is reviewed already, so it belongs under Reviewed only", r.ToReview)
+	}
+	if len(r.Reviewed) != 1 || r.Reviewed[0].Number != 8 {
+		t.Errorf("reviewed = %+v", r.Reviewed)
 	}
 	log, _ := os.ReadFile(store.path("events.log"))
 	if !strings.Contains(string(log), "#1 owner=sess-a ci-failed") || !strings.Contains(string(log), "#2 owner=? review") {
@@ -174,5 +180,19 @@ func TestClosedPRsLoseTheirOwner(t *testing.T) {
 	}
 	if o := store.Owners(); len(o) != 1 || o[1].Name != "feat-a" {
 		t.Errorf("owners = %v", o)
+	}
+}
+
+// A reply on a PR you reviewed is a reason to refresh, like activity on your own PRs.
+func TestActivityOnAReviewedPRRefreshes(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	w, gh, _ := newTestWatcher(t, store)
+	w.Poll(true)
+	w.since = "2026-01-01T00:00:00Z"
+	item := notification{Reason: "comment", UpdatedAt: "2026-02-01T00:00:00Z"}
+	item.Subject.Type, item.Subject.URL = "PullRequest", "https://api.github.com/repos/acme/widgets/pulls/8"
+	gh.notifs.Items = []notification{item}
+	if r := w.Poll(false); !r.Refreshed {
+		t.Error("a comment on a PR you reviewed didn't refresh")
 	}
 }

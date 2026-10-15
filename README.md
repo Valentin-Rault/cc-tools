@@ -6,7 +6,7 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 |---|---|
 | [`pr-watch`](#pr-watch) | A TUI that watches your open GitHub PRs and hands each CI failure, review and comment to the Claude session that owns the PR. |
 | [`cc-status`](#cc-status) | Shows which Claude sessions in your zellij panes need you, and jumps to them. |
-| [`hooks/pr-guard.sh`](#pr-guard) | A Claude Code hook. Merging always stays your call, and a session handling a pr-watch event asks before it pushes or writes to the PR. |
+| [`hooks/pr-guard.sh`](#pr-guard) | A Claude Code hook that keeps merging your call: Claude can't merge, enqueue or enable auto-merge. |
 
 macOS, zellij 0.45+, Claude Code, `gh` (logged in), `git`, `jq`. Go 1.24+ to build pr-watch; cc-status needs only Python 3.
 
@@ -125,9 +125,8 @@ focus glow.
 
 ## pr-guard
 
-A `PreToolUse` hook for `Bash`. It always denies merging, enqueueing or enabling auto-merge. In a session whose
-transcript contains a pr-watch event, it makes `git push`, PR comments and reviews, and other GitHub writes ask
-you first.
+A `PreToolUse` hook for `Bash`. It denies merging a PR, adding it to the merge queue and enabling auto-merge, in
+every session. Everything else, pushes and PR comments included, goes through as usual.
 
 ```json
 "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/pr-guard.sh", "timeout": 10 }] }]

@@ -18,8 +18,7 @@ import (
 const instructions = `Investigate and prepare the fix or reply locally. Before any git push, PR comment, review reply or thread resolve, show the user the diff or draft and wait for their OK. Never merge, enqueue or enable auto-merge.
 Sent by the pr-watch TUI; no reply needed.`
 
-// message is what the owner session receives. The pr-guard hook keys on "[pr-watch event]" in its transcript
-// to make pushes and PR writes ask the user.
+// message is what the owner session receives: one "[pr-watch event]" line per event, then what to do.
 func message(pr int, events []Event) string {
 	var b strings.Builder
 	for _, e := range events {

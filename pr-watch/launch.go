@@ -73,8 +73,7 @@ func openTab(title, dir string, claudeArgs ...string) error {
 	return err
 }
 
-// handover is the opening prompt of a session that takes a PR over. It carries the pr-watch marker so pr-guard
-// makes that session ask before pushing or writing to the PR.
+// handover is the opening prompt of a session that takes a PR over: what the PR is, then its events.
 func handover(pr int, s Stored, events []Event) string {
 	if len(events) == 0 {
 		events = []Event{{Text: "handed to this session; nothing to act on yet, pr-watch will message you"}}

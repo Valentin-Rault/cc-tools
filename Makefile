@@ -10,10 +10,12 @@ test:
 	go test ./...
 	hooks/pr-guard_test.sh
 
-# pr-watch is copied (a running TUI keeps its old binary); cc-status and pr-guard are symlinked so edits here are live
+# pr-watch is copied (a running TUI keeps its old binary) and linked onto PATH; cc-status and pr-guard are symlinked
+# so edits here are live
 install: build
 	install -d $(dir $(PR_WATCH)) $(HOME)/.local/bin $(HOME)/.claude/hooks
 	install -m 755 bin/pr-watch $(PR_WATCH)
+	ln -sf $(PR_WATCH) $(HOME)/.local/bin/pr-watch
 	ln -sf $(CURDIR)/cc-status/cc-status $(HOME)/.local/bin/cc-status
 	ln -sf $(CURDIR)/hooks/pr-guard.sh $(HOME)/.claude/hooks/pr-guard.sh
 

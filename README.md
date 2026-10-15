@@ -11,7 +11,7 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 macOS, zellij 0.45+, Claude Code, `gh` (logged in), `git`, `jq`. Go 1.24+ to build pr-watch; cc-status needs only Python 3.
 
 ```sh
-make install   # builds pr-watch into ~/.claude/pr-watch/, symlinks cc-status into ~/.local/bin and pr-guard into ~/.claude/hooks
+make install   # builds pr-watch into ~/.claude/pr-watch/ and links it and cc-status into ~/.local/bin, pr-guard into ~/.claude/hooks
 make test
 ```
 
@@ -41,7 +41,7 @@ session that opened it or last worked on it, marked *(linked)*, with nothing to 
 press `o`, or claim it from a session:
 
 ```sh
-~/.claude/pr-watch/pr-watch claim <session name> <pr>...
+pr-watch claim <session name> <pr>...
 ```
 
 A pick or a claim wins over the link and records the session's ID, so the PR stays routed when the session renames

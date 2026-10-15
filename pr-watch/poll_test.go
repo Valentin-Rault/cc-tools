@@ -38,7 +38,7 @@ const fixture = `{"mine": {"nodes": [
    "reviews": {"nodes": [
      {"id": "R0", "state": "COMMENTED", "url": "u/R0", "author": {"login": "bob"}},
      {"id": "R1", "state": "CHANGES_REQUESTED", "url": "u/R1", "author": {"login": "alice"}},
-     {"id": "R2", "state": "APPROVED", "url": "u/R2", "author": {"login": "carol"}}]},
+     {"id": "R2", "state": "APPROVED", "url": "u/R2", "author": {"login": "carol"}, "bodyText": "\n  Looks good, one nit about naming.\nMore."}]},
    "comments": {"nodes": [
      {"id": "C1", "url": "u/C1", "author": {"login": "preview-bot"}},
      {"id": "C2", "url": "u/C2", "author": {"login": "me"}},
@@ -95,6 +95,7 @@ func TestPollEventsAgainstSnapshot(t *testing.T) {
 	want := []string{
 		"#1 ci-failed on abcdef1: lint, deploy https://gh/pr/1/checks",
 		"#1 changes-requested by alice u/R1",
+		"#1 approved by carol: Looks good, one nit about naming. u/R2",
 		"#1 comment by dave u/C3",
 		"#1 comment by ghost u/C4",
 		"#1 left-merge-queue https://gh/pr/1",
@@ -103,7 +104,15 @@ func TestPollEventsAgainstSnapshot(t *testing.T) {
 	if got := eventLines(r.Events); !slices.Equal(got, want) {
 		t.Errorf("events:\n got %q\nwant %q", got, want)
 	}
+	for _, e := range r.Events {
+		if (e.Status == ForYou) != strings.HasPrefix(e.Text, "approved") {
+			t.Errorf("only approvals are for you, and they are: %+v", e)
+		}
+	}
 	snap, _ := store.Snapshot()
+	if rv := snap["1"].Reviews; len(rv) != 3 || rv[2] != (Item{Who: "carol", Kind: "approved", Note: "Looks good, one nit about naming."}) {
+		t.Errorf("reviews kept for the details = %+v", rv)
+	}
 	if got := snap["1"].Seen; !slices.Equal(got, []string{"R0", "R1", "R2", "C3", "C4"}) {
 		t.Errorf("seen for #1 = %q", got)
 	}

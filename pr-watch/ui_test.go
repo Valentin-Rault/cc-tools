@@ -446,3 +446,47 @@ func TestReviewRowShieldAndApprovals(t *testing.T) {
 		t.Error("an approved security review should have a green shield")
 	}
 }
+
+// An approval is shown, for you: it isn't sent on its own and isn't waiting, but s sends it.
+func TestApprovalsAreForYou(t *testing.T) {
+	m := testModel(t)
+	m.events = []Event{{PR: 2720, Text: "approved by tomi: one nit about naming u/R9", Status: ForYou}}
+	m.dispatch()
+	if m.events[0].Status != ForYou || m.inflight[2720] || m.waiting() != 0 {
+		t.Fatalf("event %+v, inflight %v, waiting %d", m.events[0], m.inflight, m.waiting())
+	}
+	m.width, m.height = 140, 20
+	press(m, "tab")
+	if v := screen(m); !strings.Contains(v, "✓ #2720  approved by tomi: one nit about naming") || !strings.Contains(v, "for you  s") {
+		t.Errorf("timeline:\n%s", v)
+	}
+	press(m, "s")
+	if e := m.events[0]; e.Status != Sending || e.Owner != "feat-rollback" {
+		t.Errorf("s should send it to the owner: %+v", e)
+	}
+}
+
+func TestDetailsListReviewsWithTheirComment(t *testing.T) {
+	m := testModel(t)
+	s := m.prs["2720"]
+	s.Reviews = []Item{{Who: "cursor", Kind: "review", Note: "Bugbot found 1 issue"}, {Who: "tomi", Kind: "approved", Note: "LGTM, one nit"}}
+	m.prs["2720"] = s
+	m.width, m.height = 150, 24
+	m.cursor[panelMine] = 2 // #2720
+	press(m, "e")
+	v := screen(m)
+	for _, want := range []string{"reviews  ◇ cursor commented", "           Bugbot found 1 issue", "✓ tomi approved", "           LGTM, one nit"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("details lack %q:\n%s", want, v)
+		}
+	}
+}
+
+func TestFirstLine(t *testing.T) {
+	if got := firstLine("\n\n  hello there  \nsecond"); got != "hello there" {
+		t.Errorf("firstLine = %q", got)
+	}
+	if got := firstLine(strings.Repeat("x", 120)); len([]rune(got)) != 100 || !strings.HasSuffix(got, "…") {
+		t.Errorf("long line = %q", got)
+	}
+}

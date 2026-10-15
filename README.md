@@ -76,7 +76,8 @@ preselected) and two ways to start one in a new zellij tab, with the PR's waitin
   out, or in a new one next to `repo_dir` (`<repo_dir>-pr-<n>`) when none has.
 
 When something happens on a PR (CI fails, changes are requested, a review or comment arrives, it leaves the merge
-queue), pr-watch sends the owner one message per PR. Only a Claude session can call `SendMessage`, so pr-watch
+queue), pr-watch sends the owner one message per PR. An approval is only shown, marked *for you*, with the first line
+of its comment: press `s` on it if the comment asks for something and it should go to the session. Only a Claude session can call `SendMessage`, so pr-watch
 starts a headless one for each send:
 
 ```sh

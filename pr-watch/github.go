@@ -23,7 +23,7 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
     number title url isDraft headRefName headRefOid reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
       ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
-    reviews(last: 20) { nodes { id state url author { login } } }
+    reviews(last: 20) { nodes { id state url bodyText author { login } } }
     comments(last: 20) { nodes { id url author { login } } }
   } } }
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
@@ -74,8 +74,8 @@ type prNode struct {
 }
 
 type itemNode struct {
-	ID, State, URL string
-	Author         *struct{ Login string }
+	ID, State, URL, BodyText string
+	Author                   *struct{ Login string }
 }
 
 type reviewNode struct {

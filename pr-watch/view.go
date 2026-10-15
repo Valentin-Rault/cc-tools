@@ -325,6 +325,7 @@ var kinds = map[string]struct {
 	"ci-failed": {"✗", red}, "changes-requested": {"◆", orange}, "review": {"◇", blue},
 	"comment": {"✎", cyan}, "left-merge-queue": {"↩", yellow},
 	"reply": {"↳", cyan}, "pushed": {"↑", yellow}, "asked-again": {"↻", yellow}, // on PRs you reviewed
+	"approved": {"✓", green},
 }
 
 // eventRows lays the events out newest first, under a line per day. rowOf maps each event to its row.
@@ -362,7 +363,7 @@ func (m *model) eventRow(e Event, w int) string {
 	if !ok {
 		k.glyph, k.style = "•", text2
 	}
-	done := e.Status == Sent
+	done := e.Status == Sent || e.Status == ForYou
 	dimIf := func(s lipgloss.Style) lipgloss.Style {
 		if done {
 			return faint
@@ -382,6 +383,7 @@ func (m *model) eventRow(e Event, w int) string {
 		OwnerGone:  red.Render("owner gone ") + keycap.Render(" o "),
 		Sending:    yellow.Render("sending…"),
 		Failed:     red.Render("failed ") + keycap.Render(" s "),
+		ForYou:     text2.Render("for you ") + keycap.Render(" s "),
 	}[e.Status]
 	if e.Note != "" {
 		status += comment.Render("  " + e.Note)
@@ -514,7 +516,7 @@ func (m *model) help() string {
 func (m *model) waiting() int {
 	n := 0
 	for _, e := range m.events {
-		if e.Status != Sent && e.Status != Sending {
+		if e.Status != Sent && e.Status != Sending && e.Status != ForYou {
 			n++
 		}
 	}
@@ -639,6 +641,24 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 			checks = red.Render("✗ " + strings.Join(s.Failing, ", ") + " failing")
 		}
 		field("checks", checks)
+		var reviews []string
+		for _, rv := range s.Reviews {
+			g := map[string]string{"approved": green.Render("✓"), "changes-requested": orange.Render("◆"), "review": blue.Render("◇")}[rv.Kind]
+			reviews = append(reviews, g+text2.Render(" "+rv.Who+" "+
+				map[string]string{"approved": "approved", "changes-requested": "requested changes", "review": "commented"}[rv.Kind]))
+			if rv.Note != "" { // the comment under it, two lines at most
+				note := wrapWords(rv.Note, w-9-2)
+				if len(note) > 2 {
+					note = append(note[:1], ansi.Truncate(note[1]+" "+note[2], w-9-2, "…"))
+				}
+				for _, l := range note {
+					reviews = append(reviews, "  "+faint.Render(l))
+				}
+			}
+		}
+		if len(reviews) > 0 {
+			field("reviews", reviews...)
+		}
 		field("owner", m.ownerCell(prs[i]))
 		m.eventsField(prs[i], field)
 		lines = append(lines, "", faint.Render("⏎ opens it on GitHub"))

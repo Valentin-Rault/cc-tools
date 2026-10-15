@@ -1,0 +1,152 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/cli/go-gh/v2/pkg/api"
+)
+
+// GitHub is what the watcher needs from the API; tests swap in a fake.
+type GitHub interface {
+	Login() (string, error)
+	Search(repo string) (*searchData, error)
+	Notifications(repo, lastModified string) (*notifications, error)
+}
+
+const searchQuery = `query($mine: String!, $review: String!) {
+  mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
+    number title url isDraft headRefName headRefOid mergeQueueEntry { state }
+    commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
+      ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
+    reviews(last: 20) { nodes { id state url author { login } } }
+    comments(last: 20) { nodes { id url author { login } } }
+  } } }
+  review: search(query: $review, type: ISSUE, first: 20) { nodes { ... on PullRequest {
+    number title url author { login }
+  } } }
+}`
+
+type searchData struct {
+	Mine   struct{ Nodes []prNode }     `json:"mine"`
+	Review struct{ Nodes []reviewNode } `json:"review"`
+}
+
+type prNode struct {
+	Number          int
+	Title           string
+	URL             string
+	IsDraft         bool
+	HeadRefName     string
+	HeadRefOid      string
+	MergeQueueEntry *struct{ State string }
+	Commits         struct {
+		Nodes []struct {
+			Commit struct {
+				StatusCheckRollup *struct {
+					State    string
+					Contexts struct {
+						Nodes []struct{ Name, Conclusion, Context, State string }
+					}
+				}
+			}
+		}
+	}
+	Reviews  struct{ Nodes []itemNode }
+	Comments struct{ Nodes []itemNode }
+}
+
+type itemNode struct {
+	ID, State, URL string
+	Author         *struct{ Login string }
+}
+
+type reviewNode struct {
+	Number     int
+	Title, URL string
+	Author     *struct{ Login string }
+}
+
+type notifications struct {
+	Status       int // 200, or 304 when nothing changed since lastModified
+	PollInterval time.Duration
+	LastModified string
+	Items        []notification
+}
+
+type notification struct {
+	Reason    string `json:"reason"`
+	UpdatedAt string `json:"updated_at"`
+	Subject   struct {
+		Type, URL, Title string
+	} `json:"subject"`
+}
+
+// ghClient uses gh's own login (gh auth), so pr-watch never handles a token.
+type ghClient struct {
+	gql  *api.GraphQLClient
+	rest *api.RESTClient
+	http *http.Client
+}
+
+func newGitHub() (*ghClient, error) {
+	gql, err := api.DefaultGraphQLClient()
+	if err != nil {
+		return nil, err
+	}
+	rest, err := api.DefaultRESTClient()
+	if err != nil {
+		return nil, err
+	}
+	hc, err := api.DefaultHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	return &ghClient{gql, rest, hc}, nil
+}
+
+func (c *ghClient) Login() (string, error) {
+	var u struct{ Login string }
+	err := c.rest.Get("user", &u)
+	return u.Login, err
+}
+
+func (c *ghClient) Search(repo string) (*searchData, error) {
+	var d searchData
+	err := c.gql.Do(searchQuery, map[string]any{
+		"mine":   "repo:" + repo + " is:pr is:open author:@me",
+		"review": "repo:" + repo + " is:pr is:open review-requested:@me",
+	}, &d)
+	return &d, err
+}
+
+// Notifications is a conditional request: GitHub answers 304 for free while nothing changed.
+func (c *ghClient) Notifications(repo, lastModified string) (*notifications, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/"+repo+"/notifications?all=true&per_page=50", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("If-Modified-Since", lastModified)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	n := &notifications{Status: resp.StatusCode, LastModified: resp.Header.Get("Last-Modified")}
+	if secs, err := strconv.Atoi(resp.Header.Get("X-Poll-Interval")); err == nil {
+		n.PollInterval = time.Duration(secs) * time.Second
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return n, json.NewDecoder(resp.Body).Decode(&n.Items)
+	case http.StatusNotModified:
+		return n, nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+	return nil, fmt.Errorf("notifications: %s %s", resp.Status, body)
+}

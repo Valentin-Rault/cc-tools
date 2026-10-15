@@ -68,6 +68,7 @@ type model struct {
 	inflight map[int]bool
 
 	auto, paused, polling, linking bool
+	expanded                       bool // e: the details pane is open
 	nextPoll, hotUntil             time.Time
 	ticks                          int
 	err                            error
@@ -340,6 +341,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, m.dispatch()
 	case "x":
 		m.purge()
+	case "e":
+		m.expanded = !m.expanded
 	case "o", "s", "g":
 		pr := m.selectedPR()
 		if pr == 0 {

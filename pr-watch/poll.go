@@ -29,6 +29,8 @@ type ReviewRequest struct {
 	Additions, Deletions int
 	ApprovedBy           []string // other people who approved it, apart from the security team
 	Security             string   // the security team's review: "", "requested", "approved" or "changes"
+	CI                   string   // rollup state of its checks, NONE without any
+	QueuePosition        int      // its place in the merge queue, 0 when it isn't queued
 }
 
 // Watcher is the poll loop of the old bash poller, one Poll per tick. Only one Poll runs at a time.
@@ -183,6 +185,13 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
 				Additions: n.Additions, Deletions: n.Deletions}
 			r.ApprovedBy, r.Security = otherReviews(n, w.me, w.cfg.SecurityTeam)
+			r.CI = "NONE"
+			if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
+				r.CI = n.Commits.Nodes[0].Commit.StatusCheckRollup.State
+			}
+			if n.MergeQueueEntry != nil {
+				r.QueuePosition = max(1, n.MergeQueueEntry.Position)
+			}
 			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)
 			if n.Author != nil {
 				r.Author = n.Author.Login

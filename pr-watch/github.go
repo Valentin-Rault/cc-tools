@@ -27,7 +27,8 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
     comments(last: 20) { nodes { id url author { login } } }
   } } }
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
-    number title url isDraft createdAt additions deletions author { login }
+    number title url isDraft createdAt additions deletions author { login } mergeQueueEntry { position }
+    commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } } } }
     latestOpinionatedReviews(first: 20) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
@@ -83,7 +84,13 @@ type reviewNode struct {
 	IsDraft               bool
 	Additions, Deletions  int
 	Author                *struct{ Login string }
-	ReviewRequests        struct {
+	MergeQueueEntry       *struct{ Position int }
+	Commits               struct {
+		Nodes []struct {
+			Commit struct{ StatusCheckRollup *struct{ State string } }
+		}
+	}
+	ReviewRequests struct {
 		Nodes []struct {
 			RequestedReviewer *struct{ Slug string } // a team; empty for a person
 		}

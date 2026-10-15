@@ -16,7 +16,19 @@ import (
 // The owner picker floats over the dimmed screen.
 func (m *model) View() tea.View {
 	w, h := cmp.Or(m.width, 100), cmp.Or(m.height, 30)
-	lines := m.body(w, max(0, h-2))
+	bodyW := w
+	var pane []string
+	if m.expanded { // e: details on the selected PR in a pane beside the lists
+		paneW := min(48, max(32, w/3))
+		bodyW = w - paneW - 1
+		pane = m.detail(paneW, max(0, h-2))
+	}
+	lines := m.body(bodyW, max(0, h-2))
+	for i := range lines {
+		if i < len(pane) {
+			lines[i] = cell(lines[i], bodyW) + " " + pane[i]
+		}
+	}
 	help := faint.Render(m.help())
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
@@ -204,36 +216,39 @@ func (m *model) ownerCell(pr int) string {
 var shields = map[string]string{"requested": text2.Render("\U000F0498"), "approved": green.Render("\U000F0565"),
 	"changes": orange.Render("\U000F0ECB")}
 
-// reviewRow shows whether the security team is involved, how long the request has waited (greying to orange), how
-// big the change is, and who else approved it already.
+// reviewRow keeps what matters at a glance: the security shield, the PR's status, who else approved it. How long
+// it waited and its size are in the details (e).
 func (m *model) reviewRow(r ReviewRequest, w int) string {
-	const authorW, ageW, sizeW, approvedW = 12, 4, 14, 18
-	titleW := max(16, w-7-2-2-authorW-2-ageW-2-sizeW-2-5-2-approvedW)
+	const statusW, authorW, approvedW = 2, 12, 18
+	titleW := max(16, w-7-2-2-statusW-2-authorW-2-approvedW)
 	title := text.Render(r.Title)
 	if r.Draft {
 		title = faint.Render("draft ") + title
 	}
-	age, ageStyle := "", comment
-	if !r.Created.IsZero() {
-		waited := time.Since(r.Created)
-		age = ago(waited)
-		if waited >= 72*time.Hour {
-			ageStyle = orange
-		} else if waited >= 24*time.Hour {
-			ageStyle = yellow
-		}
-	}
-	approved := ""
-	if len(r.ApprovedBy) > 0 {
-		approved = green.Render("✓ " + r.ApprovedBy[0])
-		if len(r.ApprovedBy) > 1 {
-			approved += green.Render(fmt.Sprintf(" +%d", len(r.ApprovedBy)-1))
-		}
-	}
 	return text.Render(fmt.Sprintf("#%-6d", r.Number)) + cell(shields[r.Security], 2) + cell(title, titleW) + "  " +
-		cell(text2.Render(r.Author), authorW) + "  " + cell(ageStyle.Render(age), ageW) + "  " +
-		cell(gitAdd.Render(fmt.Sprintf("+%d", r.Additions))+" "+gitDel.Render(fmt.Sprintf("−%d", r.Deletions)), sizeW) +
-		"  " + sizeBar(r.Additions+r.Deletions) + "  " + approved
+		cell(statusIcon(r), statusW) + "  " + cell(text2.Render(r.Author), authorW) + "  " + approvedCell(r.ApprovedBy)
+}
+
+// statusIcon is a PR's state in one glyph: already queued to merge, or how its checks are doing.
+func statusIcon(r ReviewRequest) string {
+	if r.QueuePosition > 0 {
+		return cyan.Render("⧗")
+	}
+	if s, ok := map[string]string{"SUCCESS": green.Render("✓"), "PENDING": yellow.Render("◐"), "EXPECTED": yellow.Render("◐"),
+		"FAILURE": red.Render("✗"), "ERROR": red.Render("✗")}[r.CI]; ok {
+		return s
+	}
+	return comment.Render("·") // no checks
+}
+
+func approvedCell(by []string) string {
+	if len(by) == 0 {
+		return ""
+	}
+	if len(by) > 1 {
+		return green.Render(fmt.Sprintf("✓ %s +%d", by[0], len(by)-1))
+	}
+	return green.Render("✓ " + by[0])
 }
 
 func sizeBar(lines int) string {
@@ -481,17 +496,19 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 
 func (m *model) help() string {
 	common := "  r refresh  p pause  a auto  q quit"
-	switch {
-	case m.picker != nil:
+	if m.picker != nil {
 		return " ↑↓ move  ⏎ choose  esc cancel"
-	case m.panel() == panelMine:
-		return " ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events" + common
-	case m.panel() == panelReview:
-		return " ←→ lists  ↑↓ move  ⏎ open for review  tab events" + common
-	case m.panel() == panelReviewed:
-		return " ←→ lists  ↑↓ move  ⏎ open what changed since your review  tab events" + common
 	}
-	return " ↑↓ move  ⏎ open  o owner  s send/resend  g go to owner  tab list" + common
+	e := map[bool]string{true: "  e close", false: "  e details"}[m.expanded]
+	switch m.panel() {
+	case panelMine:
+		return " ←→ lists  ↑↓ move  ⏎ open" + e + "  o owner  s send  g go to owner  x purge  tab events" + common
+	case panelReview:
+		return " ←→ lists  ↑↓ move  ⏎ open for review" + e + "  tab events" + common
+	case panelReviewed:
+		return " ←→ lists  ↑↓ move  ⏎ open what changed since your review" + e + "  tab events" + common
+	}
+	return " ↑↓ move  ⏎ open" + e + "  o owner  s send/resend  g go to owner  tab list" + common
 }
 
 func (m *model) waiting() int {
@@ -512,4 +529,171 @@ func (m *model) windowTitle() string {
 		return fmt.Sprintf("pr-watch ● %d waiting", n)
 	}
 	return "pr-watch"
+}
+
+// detail is the side pane e opens: more about the selected PR, from what pr-watch already knows.
+func (m *model) detail(w, h int) []string {
+	title, lines := m.detailLines(w - 4)
+	for i := range lines {
+		lines[i] = " " + lines[i]
+	}
+	return frame(title, lines, w, h, false)
+}
+
+func (m *model) detailLines(w int) (title string, lines []string) {
+	field := func(label string, values ...string) {
+		for i, v := range values {
+			lines = append(lines, comment.Render(pad(map[bool]string{true: label, false: ""}[i == 0], 9))+v)
+		}
+	}
+	head := func(n int, t, sub string) {
+		title = bold.Render(fmt.Sprintf("#%d", n))
+		for _, l := range wrapWords(t, w) {
+			lines = append(lines, bold.Render(l))
+		}
+		lines = append(lines, faint.Render(sub), "")
+	}
+	switch m.list {
+	case panelReview:
+		i := m.cursor[panelReview]
+		if i >= len(m.toReview) {
+			return "", []string{comment.Render("nothing selected")}
+		}
+		r := m.toReview[i]
+		head(r.Number, r.Title, "by "+r.Author)
+		var status []string
+		if r.QueuePosition > 0 {
+			status = append(status, cyan.Render(fmt.Sprintf("⧗ in the merge queue (%s)", ordinal(r.QueuePosition))),
+				yellow.Render("it may merge before you review it"))
+		}
+		field("status", append(status, checksText(r.CI))...)
+		var reviews []string
+		for _, who := range r.ApprovedBy {
+			reviews = append(reviews, green.Render("✓")+text2.Render(" "+who+" approved"))
+		}
+		if r.Security != "" {
+			reviews = append(reviews, shields[r.Security]+text2.Render(" "+m.cfg.SecurityTeam+" "+
+				map[string]string{"requested": "to review", "approved": "approved", "changes": "requested changes"}[r.Security]))
+		}
+		if len(reviews) == 0 {
+			reviews = []string{faint.Render("none yet")}
+		}
+		field("reviews", reviews...)
+		field("size", gitAdd.Render(fmt.Sprintf("+%d", r.Additions))+" "+gitDel.Render(fmt.Sprintf("−%d", r.Deletions))+"  "+sizeBar(r.Additions+r.Deletions))
+		if !r.Created.IsZero() {
+			waited, st := time.Since(r.Created), comment
+			if waited >= 72*time.Hour {
+				st = orange
+			} else if waited >= 24*time.Hour {
+				st = yellow
+			}
+			field("waited", st.Render(ago(waited)))
+		}
+		lines = append(lines, "", faint.Render("⏎ opens it on GitHub"))
+	case panelReviewed:
+		i := m.cursor[panelReviewed]
+		if i >= len(m.reviewed) {
+			return "", []string{comment.Render("nothing selected")}
+		}
+		r := m.reviewed[i]
+		head(r.Number, r.Title, "by "+r.Author)
+		v := verdicts[r.Verdict]
+		field("you", v.style.Render(v.glyph)+text2.Render(" "+v.label+" "+ago(time.Since(r.ReviewedAt))+" ago"))
+		var since []string
+		if r.AskedAgain {
+			since = append(since, yellow.Render("↻ asked again"))
+		}
+		if r.NewCommits > 0 {
+			since = append(since, yellow.Render("● "+plural(r.NewCommits, "new commit", "new commits")))
+		} else if r.NewCommits < 0 {
+			since = append(since, yellow.Render("● rebased"))
+		}
+		if r.Replies > 0 {
+			since = append(since, cyan.Render("↳ "+plural(r.Replies, "reply", "replies")+" in your threads"))
+		}
+		if r.Comments > 0 {
+			since = append(since, cyan.Render("✎ "+plural(r.Comments, "comment", "comments")))
+		}
+		if len(since) == 0 {
+			since = []string{faint.Render("nothing new")}
+		}
+		field("since", since...)
+		field("session", m.ownerCell(r.Number))
+		m.eventsField(r.Number, field)
+		lines = append(lines, "", faint.Render(map[bool]string{true: "⏎ opens what changed since your review", false: "⏎ opens it on GitHub"}[r.NewCommits > 0]))
+	default:
+		prs := m.prList()
+		i := m.cursor[panelMine]
+		if i >= len(prs) {
+			return "", []string{comment.Render("nothing selected")}
+		}
+		s := m.prs[strconv.Itoa(prs[i])]
+		head(prs[i], s.Title, s.Branch)
+		status := []string{rail(s)}
+		if s.Queued {
+			status = append(status, cyan.Render("⧗ in the merge queue"))
+		}
+		field("status", status...)
+		checks := checksText(s.CI)
+		if len(s.Failing) > 0 {
+			checks = red.Render("✗ " + strings.Join(s.Failing, ", ") + " failing")
+		}
+		field("checks", checks)
+		field("owner", m.ownerCell(prs[i]))
+		m.eventsField(prs[i], field)
+		lines = append(lines, "", faint.Render("⏎ opens it on GitHub"))
+	}
+	return title, lines
+}
+
+// eventsField lists the PR's latest events, newest first.
+func (m *model) eventsField(pr int, field func(string, ...string)) {
+	var evs []string
+	for i := 0; i < len(m.events) && len(evs) < 3; i++ {
+		if e, _ := m.shownEvent(i); e.PR == pr {
+			kind, _, _ := strings.Cut(e.Text, " ")
+			mark := map[bool]string{true: green.Render(" ✓"), false: yellow.Render(" !")}[e.Status == Sent]
+			evs = append(evs, comment.Render(e.At.Local().Format("15:04"))+text2.Render(" "+kind)+mark)
+		}
+	}
+	if len(evs) > 0 {
+		field("events", evs...)
+	}
+}
+
+func checksText(ci string) string {
+	return map[string]string{"SUCCESS": green.Render("✓ checks passing"), "PENDING": yellow.Render("◐ checks running"),
+		"EXPECTED": yellow.Render("◐ checks running"), "FAILURE": red.Render("✗ checks failing"), "ERROR": red.Render("✗ checks failing"),
+		"NONE": faint.Render("· no checks"), "": faint.Render("· no checks")}[ci]
+}
+
+func ordinal(n int) string {
+	switch {
+	case n%100 >= 11 && n%100 <= 13:
+		return fmt.Sprintf("%dth", n)
+	case n%10 == 1:
+		return fmt.Sprintf("%dst", n)
+	case n%10 == 2:
+		return fmt.Sprintf("%dnd", n)
+	case n%10 == 3:
+		return fmt.Sprintf("%drd", n)
+	}
+	return fmt.Sprintf("%dth", n)
+}
+
+// wrapWords breaks text into lines of at most w cells.
+func wrapWords(text string, w int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		if line != "" && lipgloss.Width(line)+1+lipgloss.Width(word) > w {
+			lines = append(lines, line)
+			line = word
+		} else if line == "" {
+			line = word
+		} else {
+			line += " " + word
+		}
+	}
+	return append(lines, line)
 }

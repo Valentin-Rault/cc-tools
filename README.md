@@ -35,9 +35,11 @@ make test
 
 It's drawn in tokyonight night on its own background, like an editor colorscheme, so it needs a terminal with true
 colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks and
-its owner. *To review* shows how long each request has waited and how big it is; a PR someone else already approved
-shows `✓ name` and moves to the bottom, and with `security_team` set, a shield shows the security team's review
-(pending, green once approved, orange with changes requested; Nerd Font icons, which Ghostty ships). *Reviewed* lists the open PRs
+its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
+how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
+`security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
+requested; Nerd Font icons, which Ghostty ships). `e` opens a pane beside the lists with more about the selected
+PR: its status, reviews, size, how long it has waited, its latest events. *Reviewed* lists the open PRs
 of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in
 your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review. A
 PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen.

@@ -217,15 +217,55 @@ func TestNameOnlyClaimsGetPinnedToTheSession(t *testing.T) {
 
 var _ tea.Model = (*model)(nil)
 
-func TestReviewRowsShowAgeAndSize(t *testing.T) {
+// How long a request waited and its size are in the details pane (e), not in the row.
+func TestReviewDetails(t *testing.T) {
 	m := testModel(t)
-	m.width, m.height = 120, 24
+	m.width, m.height = 150, 26
+	m.cfg.SecurityTeam = "security"
+	m.toReview[0].QueuePosition, m.toReview[0].CI, m.toReview[0].Security = 2, "SUCCESS", "approved"
+	m.toReview[0].ApprovedBy = []string{"carl"}
 	press(m, "right")
+	if v := screen(m); strings.Contains(v, "+412") || !strings.Contains(v, "⧗") {
+		t.Errorf("the row should show the queue icon and leave the size to the details:\n%s", v)
+	}
+	press(m, "e")
 	v := screen(m)
-	for _, want := range []string{"#2711", "bob", "2d", "+412 −38", "▰▰▰▱▱"} {
+	for _, want := range []string{"╭─ #2711", "by bob", "⧗ in the merge queue (2nd)", "it may merge before you review it",
+		"✓ checks passing", "✓ carl approved", "security approved", "+412 −38  ▰▰▰▱▱", "waited   2d", "e close"} {
 		if !strings.Contains(v, want) {
-			t.Errorf("review list lacks %q:\n%s", want, v)
+			t.Errorf("details lack %q:\n%s", want, v)
 		}
+	}
+	if got := strings.Count(v, "\n") + 1; got != 26 {
+		t.Errorf("screen has %d lines", got)
+	}
+	press(m, "left")
+	if v := screen(m); !strings.Contains(v, "╭─ #2740") || !strings.Contains(v, "owner") {
+		t.Errorf("the pane follows the shown list:\n%s", v)
+	}
+	press(m, "e")
+	if strings.Contains(screen(m), "╭─ #2740") {
+		t.Error("e should close the details")
+	}
+}
+
+func TestStatusIcon(t *testing.T) {
+	for _, c := range []struct {
+		r    ReviewRequest
+		want string
+	}{
+		{ReviewRequest{CI: "FAILURE", QueuePosition: 1}, "⧗"},
+		{ReviewRequest{CI: "FAILURE"}, "✗"},
+		{ReviewRequest{CI: "PENDING"}, "◐"},
+		{ReviewRequest{CI: "SUCCESS"}, "✓"},
+		{ReviewRequest{CI: "NONE"}, "·"},
+	} {
+		if got := ansi.Strip(statusIcon(c.r)); got != c.want {
+			t.Errorf("statusIcon(%+v) = %q, want %q", c.r, got, c.want)
+		}
+	}
+	if ordinal(1) != "1st" || ordinal(2) != "2nd" || ordinal(3) != "3rd" || ordinal(11) != "11th" || ordinal(22) != "22nd" {
+		t.Error("ordinal")
 	}
 }
 

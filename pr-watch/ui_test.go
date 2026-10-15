@@ -384,3 +384,23 @@ func TestPurgeKeepsReviewedPRs(t *testing.T) {
 		t.Error("purge dropped the owner of an open PR you reviewed")
 	}
 }
+
+func TestReviewRowShieldAndApprovals(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 140, 24
+	m.toReview = []ReviewRequest{
+		{Number: 2236, Title: "Write agreements table", Author: "bob", Security: "requested", Created: time.Now()},
+		{Number: 2418, Title: "Org workflows", Author: "frank", Security: "approved", Created: time.Now()},
+		{Number: 2458, Title: "Folders and phases", Author: "erin", ApprovedBy: []string{"lucas", "carl"}, Created: time.Now()},
+	}
+	press(m, "right")
+	v := screen(m)
+	for _, want := range []string{"#2236  \U000F0498 Write agreements table", "#2418  \U000F0565 Org workflows", "#2458    Folders and phases", "✓ lucas +1"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("to review lacks %q:\n%s", want, v)
+		}
+	}
+	if !strings.Contains(m.reviewRow(m.toReview[1], 120), fgParam(greenColor)) {
+		t.Error("an approved security review should have a green shield")
+	}
+}

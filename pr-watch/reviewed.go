@@ -171,3 +171,23 @@ func diffReviewed(old map[string]ReviewedStored, prs []ReviewedPR, at time.Time)
 	}
 	return events
 }
+
+// otherReviews reads a PR waiting for your review: who else approved it, and where the security team's review
+// stands. An approval made on the team's behalf counts for the team, not as someone else's approval.
+func otherReviews(n reviewNode, me, team string) (approvedBy []string, security string) {
+	for _, rv := range n.LatestOpinionatedReviews.Nodes {
+		if team != "" && slices.ContainsFunc(rv.OnBehalfOf.Nodes, func(t struct{ Slug string }) bool { return strings.EqualFold(t.Slug, team) }) {
+			security = map[string]string{"APPROVED": "approved", "CHANGES_REQUESTED": "changes"}[rv.State]
+			continue
+		}
+		if who := login(rv.Author); rv.State == "APPROVED" && !strings.EqualFold(who, me) {
+			approvedBy = append(approvedBy, who)
+		}
+	}
+	for _, rr := range n.ReviewRequests.Nodes { // asked (again): the team's review is pending, whatever it said before
+		if team != "" && rr.RequestedReviewer != nil && strings.EqualFold(rr.RequestedReviewer.Slug, team) {
+			security = "requested"
+		}
+	}
+	return approvedBy, security
+}

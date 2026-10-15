@@ -27,6 +27,8 @@ type ReviewRequest struct {
 	Draft                bool
 	Created              time.Time
 	Additions, Deletions int
+	ApprovedBy           []string // other people who approved it, apart from the security team
+	Security             string   // the security team's review: "", "requested", "approved" or "changes"
 }
 
 // Watcher is the poll loop of the old bash poller, one Poll per tick. Only one Poll runs at a time.
@@ -180,6 +182,7 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 		if n.Number != 0 && !slices.ContainsFunc(w.reviewed, func(r ReviewedPR) bool { return r.Number == n.Number }) {
 			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
 				Additions: n.Additions, Deletions: n.Deletions}
+			r.ApprovedBy, r.Security = otherReviews(n, w.me, w.cfg.SecurityTeam)
 			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)
 			if n.Author != nil {
 				r.Author = n.Author.Login
@@ -187,6 +190,8 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 			w.toReview = append(w.toReview, r)
 		}
 	}
+	// someone else already approved these: your review matters less, so they go last
+	slices.SortStableFunc(w.toReview, func(a, b ReviewRequest) int { return min(len(a.ApprovedBy), 1) - min(len(b.ApprovedBy), 1) })
 	w.store.write("refs", w.pushedRefs())
 	w.store.remove("retry")
 	w.refreshed = now

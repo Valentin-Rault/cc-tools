@@ -28,6 +28,8 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
   } } }
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     number title url isDraft createdAt additions deletions author { login }
+    reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } } } }
+    latestOpinionatedReviews(first: 20) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
   reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     number title url isDraft headRefOid headRefName author { login }
@@ -81,6 +83,18 @@ type reviewNode struct {
 	IsDraft               bool
 	Additions, Deletions  int
 	Author                *struct{ Login string }
+	ReviewRequests        struct {
+		Nodes []struct {
+			RequestedReviewer *struct{ Slug string } // a team; empty for a person
+		}
+	}
+	LatestOpinionatedReviews struct { // each reviewer's latest approval or request for changes
+		Nodes []struct {
+			State      string
+			Author     *struct{ Login string }
+			OnBehalfOf struct{ Nodes []struct{ Slug string } }
+		}
+	}
 }
 
 type reviewedNode struct {

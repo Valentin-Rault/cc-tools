@@ -235,3 +235,27 @@ func TestReviewedPRsInThePoll(t *testing.T) {
 		t.Errorf("reviewer events = %q", reviewer)
 	}
 }
+
+// PRs someone else already approved go to the bottom of To review.
+func TestApprovedReviewRequestsGoLast(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	w, gh, _ := newTestWatcher(t, store)
+	var review struct{ Nodes []reviewNode }
+	json.Unmarshal([]byte(`{"nodes": [
+		{"number": 20, "title": "approved", "latestOpinionatedReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "lucas"}}]}},
+		{"number": 21, "title": "not yet"},
+		{"number": 22, "title": "security only", "latestOpinionatedReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "lucas"}, "onBehalfOf": {"nodes": [{"slug": "security"}]}}]}}]}`), &review)
+	gh.search.Review = review
+	w.cfg.SecurityTeam = "security"
+	r := w.Poll(true)
+	var order []int
+	for _, rr := range r.ToReview {
+		order = append(order, rr.Number)
+	}
+	if !slices.Equal(order, []int{21, 22, 20}) {
+		t.Errorf("order = %v", order)
+	}
+	if r.ToReview[1].Security != "approved" || len(r.ToReview[2].ApprovedBy) != 1 {
+		t.Errorf("to review = %+v", r.ToReview)
+	}
+}

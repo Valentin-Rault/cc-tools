@@ -35,7 +35,9 @@ make test
 
 It's drawn in tokyonight night on its own background, like an editor colorscheme, so it needs a terminal with true
 colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks and
-its owner. *To review* shows how long each request has waited and how big it is. *Reviewed* lists the open PRs
+its owner. *To review* shows how long each request has waited and how big it is; a PR someone else already approved
+shows `✓ name` and moves to the bottom, and with `security_team` set, a shield shows the security team's review
+(pending, green once approved, orange with changes requested; Nerd Font icons, which Ghostty ships). *Reviewed* lists the open PRs
 of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in
 your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review. A
 PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen.
@@ -100,11 +102,13 @@ override it):
 {
   "repo": "acme/widgets",
   "repo_dir": "~/code/widgets",
-  "ignore": ["github-actions", "dependabot"]
+  "ignore": ["github-actions", "dependabot"],
+  "security_team": "security"
 }
 ```
 
-`ignore` lists logins whose reviews and comments never need action. State lives in `~/.pr-watch/`
+`ignore` lists logins whose reviews and comments never need action. `security_team` is the slug of a team whose
+review some PRs need (optional). State lives in `~/.pr-watch/`
 (`PR_WATCH_DIR`); `events.log` there is the history of everything detected and sent.
 
 ## cc-status

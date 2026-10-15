@@ -199,10 +199,16 @@ func (m *model) ownerCell(pr int) string {
 	return red.Render("○") + text.Render(" "+owner.Name) + faint.Render(" (not running)")
 }
 
-// reviewRow shows how long a request has waited, greying to orange, and how big the change is.
+// Shield icons from Nerd Fonts (Ghostty ships them): the security team's review is pending, approved, or asked for
+// changes.
+var shields = map[string]string{"requested": text2.Render("\U000F0498"), "approved": green.Render("\U000F0565"),
+	"changes": orange.Render("\U000F0ECB")}
+
+// reviewRow shows whether the security team is involved, how long the request has waited (greying to orange), how
+// big the change is, and who else approved it already.
 func (m *model) reviewRow(r ReviewRequest, w int) string {
-	const authorW, ageW, sizeW = 12, 4, 14
-	titleW := max(16, w-7-2-authorW-2-ageW-2-sizeW-2-5)
+	const authorW, ageW, sizeW, approvedW = 12, 4, 14, 18
+	titleW := max(16, w-7-2-2-authorW-2-ageW-2-sizeW-2-5-2-approvedW)
 	title := text.Render(r.Title)
 	if r.Draft {
 		title = faint.Render("draft ") + title
@@ -217,9 +223,17 @@ func (m *model) reviewRow(r ReviewRequest, w int) string {
 			ageStyle = yellow
 		}
 	}
-	return text.Render(fmt.Sprintf("#%-6d", r.Number)) + cell(title, titleW) + "  " + cell(text2.Render(r.Author), authorW) + "  " +
-		cell(ageStyle.Render(age), ageW) + "  " + cell(gitAdd.Render(fmt.Sprintf("+%d", r.Additions))+" "+gitDel.Render(fmt.Sprintf("−%d", r.Deletions)), sizeW) +
-		"  " + sizeBar(r.Additions+r.Deletions)
+	approved := ""
+	if len(r.ApprovedBy) > 0 {
+		approved = green.Render("✓ " + r.ApprovedBy[0])
+		if len(r.ApprovedBy) > 1 {
+			approved += green.Render(fmt.Sprintf(" +%d", len(r.ApprovedBy)-1))
+		}
+	}
+	return text.Render(fmt.Sprintf("#%-6d", r.Number)) + cell(shields[r.Security], 2) + cell(title, titleW) + "  " +
+		cell(text2.Render(r.Author), authorW) + "  " + cell(ageStyle.Render(age), ageW) + "  " +
+		cell(gitAdd.Render(fmt.Sprintf("+%d", r.Additions))+" "+gitDel.Render(fmt.Sprintf("−%d", r.Deletions)), sizeW) +
+		"  " + sizeBar(r.Additions+r.Deletions) + "  " + approved
 }
 
 func sizeBar(lines int) string {

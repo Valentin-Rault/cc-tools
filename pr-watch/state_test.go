@@ -68,6 +68,10 @@ func TestConfig(t *testing.T) {
 	if c.Repo != "acme/widgets" || c.RepoDir != home()+"/code/widgets" || len(c.Ignore) != 2 {
 		t.Errorf("config = %+v", c)
 	}
+	t.Setenv("PR_WATCH_SECURITY_TEAM", "acme/security")
+	if c, _ := loadConfig(); c.SecurityTeam != "security" {
+		t.Errorf("security team = %q, want the slug", c.SecurityTeam)
+	}
 }
 
 // Sessions rename themselves, so an owner claimed with a session ID is found under its new name.

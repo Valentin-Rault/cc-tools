@@ -87,3 +87,37 @@ func TestDiffReviewed(t *testing.T) {
 		t.Errorf("events:\n got %q\nwant %q", got, want)
 	}
 }
+
+func TestOtherReviews(t *testing.T) {
+	cases := []struct {
+		name, json, security string
+		approvedBy           []string
+	}{
+		{"approved by others, not by me", `{"latestOpinionatedReviews": {"nodes": [
+			{"state": "APPROVED", "author": {"login": "lucas"}}, {"state": "APPROVED", "author": {"login": "me"}},
+			{"state": "CHANGES_REQUESTED", "author": {"login": "hman"}}, {"state": "APPROVED", "author": {"login": "carl"}}]}}`, "", []string{"lucas", "carl"}},
+		{"security approved on its behalf", `{"latestOpinionatedReviews": {"nodes": [
+			{"state": "APPROVED", "author": {"login": "lucas"}, "onBehalfOf": {"nodes": [{"slug": "security"}]}}]}}`, "approved", nil},
+		{"security asked for changes", `{"latestOpinionatedReviews": {"nodes": [
+			{"state": "CHANGES_REQUESTED", "author": {"login": "lucas"}, "onBehalfOf": {"nodes": [{"slug": "Security"}]}}]}}`, "changes", nil},
+		{"security still to review", `{"reviewRequests": {"nodes": [{"requestedReviewer": {"slug": "infra"}}, {"requestedReviewer": {"slug": "security"}},
+			{"requestedReviewer": {}}]}}`, "requested", nil},
+		{"asked again after approving", `{"reviewRequests": {"nodes": [{"requestedReviewer": {"slug": "security"}}]},
+			"latestOpinionatedReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "lucas"}, "onBehalfOf": {"nodes": [{"slug": "security"}]}}]}}`, "requested", nil},
+	}
+	for _, c := range cases {
+		var n reviewNode
+		if err := json.Unmarshal([]byte(c.json), &n); err != nil {
+			t.Fatal(c.name, err)
+		}
+		approvedBy, security := otherReviews(n, "me", "security")
+		if security != c.security || !slices.Equal(approvedBy, c.approvedBy) {
+			t.Errorf("%s: approvedBy=%q security=%q", c.name, approvedBy, security)
+		}
+	}
+	var n reviewNode
+	json.Unmarshal([]byte(`{"reviewRequests": {"nodes": [{"requestedReviewer": {"slug": "security"}}]}}`), &n)
+	if _, security := otherReviews(n, "me", ""); security != "" {
+		t.Error("no security team configured, yet a shield")
+	}
+}

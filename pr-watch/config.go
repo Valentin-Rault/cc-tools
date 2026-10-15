@@ -15,6 +15,8 @@ type Config struct {
 	Repo    string   `json:"repo"`     // owner/name of the repo whose PRs you author
 	RepoDir string   `json:"repo_dir"` // a local clone: a push from any worktree moves its origin/<branch> refs
 	Ignore  []string `json:"ignore"`   // logins whose reviews and comments never need action (bots)
+	// SecurityTeam is the slug of a team whose review some PRs need; they get a shield in To review.
+	SecurityTeam string `json:"security_team"`
 }
 
 func configPath() string {
@@ -44,6 +46,12 @@ func loadConfig() (Config, error) {
 	}
 	if v := os.Getenv("PR_WATCH_IGNORE"); v != "" {
 		c.Ignore = strings.Split(v, ",")
+	}
+	if v := os.Getenv("PR_WATCH_SECURITY_TEAM"); v != "" {
+		c.SecurityTeam = v
+	}
+	if _, slug, ok := strings.Cut(c.SecurityTeam, "/"); ok { // "org/team" works too
+		c.SecurityTeam = slug
 	}
 	if rest, ok := strings.CutPrefix(c.RepoDir, "~/"); ok {
 		c.RepoDir = filepath.Join(home(), rest)

@@ -147,6 +147,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionsMsg:
 		if msg.err == nil {
 			m.sessions = msg.sessions
+			m.pinOwners()
 		}
 
 	case sentMsg:
@@ -331,6 +332,19 @@ func (m *model) send(pr int, include func(Event) bool) tea.Cmd {
 		}
 		return sentMsg{pr, s.Name, sender.Send(s.Name, text)}
 	}
+}
+
+// pinOwners adds the session ID to claims made by name only (by the bash version, or while `claude agents` failed),
+// so those PRs stay routed once their session renames itself.
+func (m *model) pinOwners() {
+	for pr, o := range m.owners {
+		if s, ok := findSession(m.sessions, o.Name); ok && o.SessionID == "" {
+			if err := m.store.Claim(Owner{Name: o.Name, SessionID: s.SessionID}, []int{pr}); err != nil {
+				m.flash = "recording the owner's session: " + err.Error()
+			}
+		}
+	}
+	m.owners = m.store.Owners()
 }
 
 func (m *model) savePending() {

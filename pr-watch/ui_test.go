@@ -65,3 +65,13 @@ func TestView(t *testing.T) {
 		t.Errorf("picker:\n%s", v)
 	}
 }
+
+func TestNameOnlyClaimsGetPinnedToTheSession(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.write("owners", "7 feat-x\n8 gone-session\n")
+	m := newModel(Config{}, store, &Watcher{}, nil)
+	m.Update(sessionsMsg{sessions: []Session{{Name: "feat-x", SessionID: "id-7"}}})
+	if got := store.read("owners"); got != "7 feat-x id-7\n8 gone-session" {
+		t.Errorf("owners = %q", got)
+	}
+}

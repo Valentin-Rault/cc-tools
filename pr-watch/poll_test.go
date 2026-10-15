@@ -161,3 +161,18 @@ func TestReviewRequestNotifiesOnce(t *testing.T) {
 		t.Errorf("notified file = %q", got)
 	}
 }
+
+// A PR that leaves your open PRs (merged or closed) loses its owner on the next refresh.
+func TestClosedPRsLoseTheirOwner(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.SaveSnapshot(map[string]Stored{"1": {Seen: []string{"R0", "R1", "R2", "C3", "C4"}}, "5": {}})
+	store.Claim(Owner{Name: "feat-a"}, []int{1, 5})
+	w, _, _ := newTestWatcher(t, store)
+	r := w.Poll(true)
+	if len(r.Closed) != 1 || r.Closed[0] != 5 {
+		t.Errorf("closed = %v", r.Closed)
+	}
+	if o := store.Owners(); len(o) != 1 || o[1].Name != "feat-a" {
+		t.Errorf("owners = %v", o)
+	}
+}

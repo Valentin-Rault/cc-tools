@@ -81,8 +81,30 @@ func (s Store) Owners() map[int]Owner {
 	return owners
 }
 
-// Claim routes the PRs' events to owner. Many Claude sessions claim at once, so the rewrite is serialized with flock.
+// Claim routes the PRs' events to owner.
 func (s Store) Claim(owner Owner, prs []int) error {
+	err := s.editOwners(func(owners map[int]Owner) {
+		for _, pr := range prs {
+			owners[pr] = owner
+		}
+	})
+	if err != nil {
+		return err
+	}
+	return s.Hot()
+}
+
+// Unclaim drops the PRs' owners, e.g. when handing one to a new session failed.
+func (s Store) Unclaim(prs []int) error {
+	return s.editOwners(func(owners map[int]Owner) {
+		for _, pr := range prs {
+			delete(owners, pr)
+		}
+	})
+}
+
+// editOwners rewrites the owners file. Many Claude sessions claim at once, so it's serialized with flock.
+func (s Store) editOwners(edit func(map[int]Owner)) error {
 	lock, err := os.OpenFile(s.path("owners.lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
@@ -92,17 +114,12 @@ func (s Store) Claim(owner Owner, prs []int) error {
 		return err
 	}
 	owners := s.Owners()
-	for _, pr := range prs {
-		owners[pr] = owner
-	}
+	edit(owners)
 	var b strings.Builder
 	for _, n := range slices.Sorted(maps.Keys(owners)) {
 		fmt.Fprintln(&b, strings.TrimSpace(fmt.Sprintf("%d %s %s", n, owners[n].Name, owners[n].SessionID)))
 	}
-	if err := s.write("owners", b.String()); err != nil {
-		return err
-	}
-	return s.Hot()
+	return s.write("owners", b.String())
 }
 
 func (s Store) Hot() error {

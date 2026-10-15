@@ -26,8 +26,8 @@ const searchQuery = `query($mine: String!, $review: String!) {
     reviews(last: 20) { nodes { id state url author { login } } }
     comments(last: 20) { nodes { id url author { login } } }
   } } }
-  review: search(query: $review, type: ISSUE, first: 20) { nodes { ... on PullRequest {
-    number title url author { login }
+  review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
+    number title url isDraft createdAt author { login }
   } } }
 }`
 
@@ -66,9 +66,10 @@ type itemNode struct {
 }
 
 type reviewNode struct {
-	Number     int
-	Title, URL string
-	Author     *struct{ Login string }
+	Number                int
+	Title, URL, CreatedAt string
+	IsDraft               bool
+	Author                *struct{ Login string }
 }
 
 type notifications struct {

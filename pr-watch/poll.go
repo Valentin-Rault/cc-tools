@@ -20,6 +20,8 @@ const epoch = "Thu, 01 Jan 1970 00:00:00 GMT"
 type ReviewRequest struct {
 	Number             int
 	Title, URL, Author string
+	Draft              bool
+	Created            time.Time
 }
 
 // Watcher is the poll loop of the old bash poller, one Poll per tick. Only one Poll runs at a time.
@@ -41,6 +43,7 @@ type PollResult struct {
 	Events    []Event
 	Interval  time.Duration // GitHub's X-Poll-Interval
 	Refreshed bool
+	Closed    []int // PRs that left your open PRs since the last refresh (merged or closed)
 	Err       error
 }
 
@@ -90,8 +93,18 @@ func (w *Watcher) Poll(force bool) PollResult {
 
 	r := PollResult{Interval: w.interval}
 	if need {
+		old := w.snap
 		events, err := w.refresh(now)
 		r.Events, r.Refreshed = events, err == nil
+		for pr := range old {
+			if _, open := w.snap[pr]; !open && err == nil {
+				n, _ := strconv.Atoi(pr)
+				r.Closed = append(r.Closed, n)
+			}
+		}
+		if len(r.Closed) > 0 { // their owners have nothing left to receive
+			errs = append(errs, w.store.Unclaim(r.Closed))
+		}
 		errs = append(errs, err)
 	}
 	r.PRs, r.ToReview, r.Err = w.snap, w.toReview, errors.Join(errs...)
@@ -143,7 +156,8 @@ func (w *Watcher) refresh(now time.Time) ([]Event, error) {
 	w.toReview = nil
 	for _, n := range d.Review.Nodes {
 		if n.Number != 0 {
-			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost"}
+			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft}
+			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)
 			if n.Author != nil {
 				r.Author = n.Author.Login
 			}

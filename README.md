@@ -18,37 +18,42 @@ make test
 ## pr-watch
 
 ```
- pr-watch ● watching · next 42s · auto                                    acme/widgets
- ── My PRs (3) ─────────────────────────────────────────────────────────────────────────
- ▸ #2720  Rollback docs            ✗ lint, deploy                  ● feat-rollback
-   #2731  Ledger import            ◐                               ● feat-ledger
-   #2740  Project refs             ✓ ⧗ queued                      ? suggest feat-refs (o)
- ── Events (2) ─────────────────────────────────────────────────────────────────────────
+ pr-watch ● watching · next 42s · auto                                              acme/widgets
+
+  My PRs 3 │ To review 1  ←→ ────────────────────────────────────────────────────────────────
+ ▸ #2740  draft Project refs               ✓ ⧗ queued              ? suggest feat-refs (o)
+   #2731  Ledger import                    ◐                       ● feat-ledger (linked)
+   #2720  Rollback docs                    ✗ lint, deploy          ● feat-rollback
+ ── Events (3) ─────────────────────────────────────────────────────────────────────────────
    09:15 #2740  review by alice                          → ?              needs owner (o)
+   09:13 #2731  comment by bob                           → feat-ledger    sent ✓
    09:12 #2720  ci-failed on 3f9a2c1: lint, deploy       → feat-rollback  sent ✓
- ── Waiting for your review (1) ────────────────────────────────────────────────────────
-   #2711  Add reconciliation by bob
-  tab panel  ↑↓ move  o owner  s send  g go to pane  ⏎ open  r refresh  p pause  a auto/manual  q quit
+  ←→ lists  ↑↓ move  ⏎ open  o owner  s send  g go to owner  x purge  tab events  r refresh  p pause  a auto  q quit
 ```
 
 Keep it open in a zellij tab while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
-the next start it catches up from its last snapshot.
+the next start it catches up from its last snapshot. `←`/`→` (or `tab`) switch between your PRs and the PRs waiting
+for your review; `⏎` opens the selected one in the browser.
 
-**How events reach a session.** Each Claude session that opens a PR claims it:
+**Who owns a PR.** Claude Code records in a session's transcript which PR the session's branch belongs to
+(`"type":"pr-link"` lines; `claude --from-pr` uses them too). pr-watch reads those, so a PR's events go to the running
+session that opened it or last worked on it, marked *(linked)*, with nothing to set up. To route a PR elsewhere,
+press `o`, or claim it from a session:
 
 ```sh
 ~/.claude/pr-watch/pr-watch claim <session name> <pr>...
 ```
 
-Put this in `~/.claude/CLAUDE.md` so sessions do it on their own:
+A pick or a claim wins over the link and records the session's ID, so the PR stays routed when the session renames
+itself. When the PR is merged or closed its owner is dropped; `x` also purges owners and undelivered events of PRs
+that aren't open anymore.
 
-```md
-When you open a PR or take one over, register this session as its owner so pr-watch sends its CI failures
-and review feedback here: `~/.claude/pr-watch/pr-watch claim <this session's name from ListAgents> <pr>...`.
-```
+The `o` picker lists the running sessions (the linked one, or the one with the PR's branch checked out, is
+preselected) and two ways to start one in a new zellij tab, with the PR's waiting events as its opening prompt:
 
-A claim records the session's ID too, so the PR stays routed when the session renames itself. You can also pick
-an owner in the TUI with `o`; it preselects the session whose worktree has the PR's branch checked out.
+- **resume the session that worked on it**: `claude --resume <its id>` in the folder it ran in, when it isn't running.
+- **new Claude session**: `claude --session-id <new id> -n pr-<n>` in the worktree that has the PR's branch checked
+  out, or in a new one next to `repo_dir` (`<repo_dir>-pr-<n>`) when none has.
 
 When something happens on a PR (CI fails, changes are requested, a review or comment arrives, it leaves the merge
 queue), pr-watch sends the owner one message per PR. Only a Claude session can call `SendMessage`, so pr-watch
@@ -67,7 +72,7 @@ and marks the event *sent* only if `SendMessage` was called with exactly that re
 **Polling.** A conditional request to GitHub's notifications API every `X-Poll-Interval` (a free 304 while
 nothing changed). Your PRs are refreshed with one GraphQL query only when a notification concerns them, a PR is
 queued or has pending CI, you pushed one of their branches (the local `origin/<branch>` refs moved), or a claim
-just came in. Review requests and mentions on other people's PRs show in the bottom panel and as one macOS
+just came in. Review requests and mentions on other people's PRs show in the *To review* list and as one macOS
 notification each.
 
 **Config** in `~/.config/pr-watch/config.json` (`PR_WATCH_REPO`, `PR_WATCH_REPO_DIR` and `PR_WATCH_IGNORE`

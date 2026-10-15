@@ -495,6 +495,9 @@ func (m *model) View() tea.View {
 		}
 	}
 
+	if m.height > 1 && len(lines) > m.height-1 { // a short terminal: cut the panels, keep the key help
+		lines = lines[:m.height-1]
+	}
 	for len(lines) < m.height-1 {
 		lines = append(lines, "")
 	}

@@ -130,12 +130,14 @@ tab of its stage, creating the tabs as needed:
 | Done | all its PRs merged or closed, ready to clean up |
 
 A session moves when its stage changes, never while you're in its pane, and a pane you move by hand stays until
-its stage changes again. Sessions working outside the repo are left alone. `pr-watch tabs` prints what would move
-where without moving anything.
+its stage changes again. A session started from the `o` picker opens in the tab of its stage. Sessions working
+outside the repo are left alone. `pr-watch tabs` prints what would move where without moving anything.
 
 zellij's command line can't move a pane to another tab, so a small plugin does (`zellij-tabs/`, Rust built for
 `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
-`zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`.
+`zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`. In zellij 0.45.1 the plugin API
+can't move a pane into most existing tabs either, so pr-watch opens a placeholder pane in the tab, without focus, and
+the plugin swaps the session's pane in for it.
 
 ## cc-status
 

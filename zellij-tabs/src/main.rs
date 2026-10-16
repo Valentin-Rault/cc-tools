@@ -1,36 +1,41 @@
-//! pr-watch-tabs: a zellij plugin that moves panes to tabs by name, for pr-watch.
+//! pr-watch-tabs: a zellij plugin that moves panes to other tabs, for pr-watch.
 //!
-//! pr-watch sends `zellij pipe --plugin file:…/pr-watch-tabs.wasm --name move -- "<pane id> <tab name>"`. The
-//! plugin moves that terminal pane to the tab with that name, or to a new tab of that name when there's none,
-//! without moving anyone's focus. zellij's command line can't move a pane to another tab; its plugin API can.
+//! pr-watch sends `zellij pipe --plugin file:…/pr-watch-tabs.wasm --name move -- "<pane id> <placeholder> <tab name>"`,
+//! one move per line. To move a pane into a tab that exists, pr-watch first opens a placeholder pane there, and the
+//! plugin replaces the placeholder with the pane, which closes the placeholder. With `-` for the placeholder, the pane
+//! goes to a new tab of that name, along with the other panes for that tab. The plugin answers "queued" at once, then
+//! moves the panes one step at a time, without moving anyone's focus; pr-watch checks where they end up itself.
+//!
+//! zellij's command line can't move a pane to another tab, and in zellij 0.45.1 its plugin API can't move one into most
+//! existing tabs: break_panes_to_tab_with_id and _with_index both check the number they're given against the tabs'
+//! positions, then put the pane in the tab with that ID, so they work only while a tab's ID is also a position, which
+//! stops once tabs have been closed. Replacing a pane with an existing one works across tabs.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, VecDeque};
 use zellij_tile::prelude::*;
+
+/// How long to wait after a step before the next one, for zellij to settle.
+const SETTLE_SECS: f64 = 0.3;
+
+struct Move {
+    pane: u32,
+    placeholder: Option<u32>, // a pane pr-watch opened in the target tab; None for a new tab
+    tab: String,
+}
 
 #[derive(Default)]
 struct State {
-    tabs: Vec<TabInfo>,
     granted: bool,
-    waiting: Vec<Move>,          // arrived before the permissions, or while their tab is being created
-    creating: HashSet<String>,   // tabs asked for, not in a TabUpdate yet
-}
-
-struct Move {
-    pipe: String, // the CLI pipe to answer
-    pane: u32,
-    tab: String,
+    queue: VecDeque<Move>,
+    settling: bool, // a timer is set: the next step waits for it
 }
 
 register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
-        request_permission(&[
-            PermissionType::ReadApplicationState,
-            PermissionType::ChangeApplicationState,
-            PermissionType::ReadCliPipes,
-        ]);
-        subscribe(&[EventType::TabUpdate, EventType::PermissionRequestResult]);
+        request_permission(&[PermissionType::ChangeApplicationState, PermissionType::ReadCliPipes]);
+        subscribe(&[EventType::PermissionRequestResult, EventType::Timer]);
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -39,20 +44,12 @@ impl ZellijPlugin for State {
                 self.granted = true;
                 set_selectable(false);
                 hide_self();
-                self.run();
             }
-            Event::PermissionRequestResult(PermissionStatus::Denied) => {
-                for m in std::mem::take(&mut self.waiting) {
-                    answer(&m.pipe, "error: pr-watch-tabs was denied the permissions it needs");
-                }
-            }
-            Event::TabUpdate(tabs) => {
-                self.creating.retain(|name| !tabs.iter().any(|t| base(&t.name) == name));
-                self.tabs = tabs;
-                self.run();
-            }
+            Event::PermissionRequestResult(PermissionStatus::Denied) => self.queue.clear(),
+            Event::Timer(_) => self.settling = false,
             _ => {}
         }
+        self.step();
         false
     }
 
@@ -60,17 +57,28 @@ impl ZellijPlugin for State {
         let PipeSource::Cli(pipe) = message.source else {
             return false;
         };
-        let payload = message.payload.unwrap_or_default();
-        let parsed = payload.trim().split_once(' ').and_then(|(pane, tab)| {
-            let pane = pane.trim_start_matches("terminal_").parse::<u32>().ok()?;
-            Some((pane, tab.trim().to_string()))
-        });
-        match (message.name.as_str(), parsed) {
-            ("move", Some((pane, tab))) if !tab.is_empty() => {
-                self.waiting.push(Move { pipe, pane, tab });
-                self.run();
+        if message.name != "move" {
+            answer(&pipe, "error: expected --name move");
+            return false;
+        }
+        let mut moves = vec![];
+        for line in message.payload.unwrap_or_default().lines().filter(|l| !l.trim().is_empty()) {
+            match parse(line) {
+                Some(m) => moves.push(m),
+                None => {
+                    answer(&pipe, &format!("error: expected \"<pane id> <placeholder pane id or -> <tab name>\", got {line:?}"));
+                    return false;
+                }
             }
-            _ => answer(&pipe, "error: expected --name move -- \"<pane id> <tab name>\""),
+        }
+        let waiting = if self.granted { "" } else { " (waiting for its permissions in zellij)" };
+        answer(&pipe, &format!("queued {}{waiting}", moves.len()));
+        self.queue.extend(moves);
+        // the moves start on a timer, not here: a move waits for zellij, and zellij drops the answer to a pipe that
+        // takes over a second
+        if !self.settling {
+            self.settling = true;
+            set_timeout(0.05);
         }
         false
     }
@@ -84,34 +92,46 @@ impl ZellijPlugin for State {
 }
 
 impl State {
-    // run does the moves it can: a move to a tab being created waits for the TabUpdate that shows it.
-    fn run(&mut self) {
-        if !self.granted || self.tabs.is_empty() {
+    // step makes the next move, once the previous one has settled. Panes for a new tab all go in one step.
+    fn step(&mut self) {
+        if !self.granted || self.settling {
             return;
         }
-        for m in std::mem::take(&mut self.waiting) {
-            if self.creating.contains(&m.tab) {
-                self.waiting.push(m);
-                continue;
+        let Some(m) = self.queue.pop_front() else {
+            return;
+        };
+        match m.placeholder {
+            Some(placeholder) => {
+                replace_pane_with_existing_pane(PaneId::Terminal(placeholder), PaneId::Terminal(m.pane), false);
             }
-            let pane = [PaneId::Terminal(m.pane)];
-            match self.tabs.iter().find(|t| base(&t.name) == m.tab) {
-                Some(tab) => {
-                    break_panes_to_tab_with_id(&pane, tab.tab_id, false);
-                }
-                None => {
-                    break_panes_to_new_tab(&pane, Some(m.tab.clone()), false);
-                    self.creating.insert(m.tab.clone());
-                }
+            None => {
+                let mut panes = vec![PaneId::Terminal(m.pane)];
+                self.queue.retain(|o| {
+                    let same = o.placeholder.is_none() && o.tab == m.tab;
+                    if same {
+                        panes.push(PaneId::Terminal(o.pane));
+                    }
+                    !same
+                });
+                break_panes_to_new_tab(&panes, Some(m.tab), false);
             }
-            answer(&m.pipe, "moved");
         }
+        self.settling = true;
+        set_timeout(SETTLE_SECS);
     }
 }
 
-// base is a tab's name without the badges cc-status appends to it (" ●", " ✓", " ◐").
-fn base(name: &str) -> &str {
-    name.trim_end_matches(['●', '✓', '◐']).trim_end()
+// parse reads "<pane id> <placeholder pane id or -> <tab name>"; pane IDs may have zellij's "terminal_" prefix.
+fn parse(line: &str) -> Option<Move> {
+    let pane_id = |s: &str| s.trim_start_matches("terminal_").parse::<u32>().ok();
+    let (pane, rest) = line.trim().split_once(' ')?;
+    let (placeholder, tab) = rest.trim_start().split_once(' ')?;
+    let tab = tab.trim();
+    Some(Move {
+        pane: pane_id(pane)?,
+        placeholder: if placeholder == "-" { None } else { Some(pane_id(placeholder)?) },
+        tab: (!tab.is_empty()).then(|| tab.to_string())?,
+    })
 }
 
 fn answer(pipe: &str, text: &str) {

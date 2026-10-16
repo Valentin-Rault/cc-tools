@@ -41,8 +41,8 @@ type (
 	}
 	jumpMsg struct{ err error }
 	tabsMsg struct {
-		moved []tabMove
-		err   error
+		asked, arrived []tabMove
+		err            error
 	}
 	queuedMsg struct {
 		pr     int
@@ -77,9 +77,10 @@ type model struct {
 	inflight map[int]bool
 
 	auto, paused, polling, linking bool
-	arranging                      bool   // a round of tab moves is running
-	tabsErr                        string // the last error from it, shown once
-	expanded                       bool   // e: the details pane is open
+	arranging                      bool           // a round of tab moves is running
+	tabsErr                        string         // the last error from it, shown once
+	tabTries                       map[string]int // rounds a move was asked for without happening, by session ID
+	expanded                       bool           // e: the details pane is open
 	nextPoll, hotUntil             time.Time
 	ticks                          int
 	err                            error
@@ -166,11 +167,14 @@ func (m *model) arrangeTabs() tea.Cmd {
 	}
 	m.arranging = true
 	v := tabView{prs: m.prs, reviewed: m.reviewed, toReview: m.toReview, owners: m.owners, links: m.links, mentions: m.mentions}
-	sessions, store, cfg := m.sessions, m.store, m.cfg
+	if m.tabTries == nil {
+		m.tabTries = map[string]int{}
+	}
+	sessions, store, cfg, tries := m.sessions, m.store, m.cfg, m.tabTries // only this goroutine touches tries till it's done
 	return func() tea.Msg {
 		v.repoDirs = repoDirs(cfg.RepoDir)
-		moved, err := arrange(store, cfg.TabsPlugin, v.plan(sessions, locate(sessions), store.TabsPlaced()))
-		return tabsMsg{moved, err}
+		asked, arrived, err := arrange(store, cfg.TabsPlugin, v.plan(sessions, locate(sessions), store.TabsPlaced(), tries), tries)
+		return tabsMsg{asked, arrived, err}
 	}
 }
 
@@ -236,9 +240,14 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tabsMsg:
 		m.arranging = false
-		for _, mv := range msg.moved {
+		for _, mv := range msg.arrived {
 			m.flash = fmt.Sprintf("moved %s to the %s tab", mv.Session.Name, mv.Stage)
 			m.store.appendLine("events.log", fmt.Sprintf("%s %s moved to the %s tab", time.Now().UTC().Format(time.RFC3339), mv.Session.Name, mv.Stage))
+		}
+		for _, mv := range msg.asked {
+			if m.tabTries[mv.Session.SessionID] == maxTries {
+				m.flash = fmt.Sprintf("%s didn't move to the %s tab after %d tries", mv.Session.Name, mv.Stage, maxTries)
+			}
 		}
 		if e := fmt.Sprint(msg.err); msg.err != nil && e != m.tabsErr {
 			m.flash = "tabs: " + e
@@ -544,8 +553,18 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 	}
 	m.owners, m.inflight[pr] = m.store.Owners(), true
 	m.savePending()
-	m.flash = fmt.Sprintf("#%d: opening a new tab", pr)
 	prompt, title, repoDir := handover(pr, info, batch), fmt.Sprintf("PR #%d", pr), m.cfg.RepoDir
+	if m.cfg.ArrangeTabs { // straight into the tab of its stage, the one pr-watch would move it to
+		switch {
+		case info.Reviewing:
+			title = stageReviewing
+		case info.Draft:
+			title = stageWIP
+		default:
+			title = stageReview
+		}
+	}
+	m.flash = fmt.Sprintf("#%d: opening a session in the %s tab", pr, title)
 	return func() tea.Msg {
 		var err error
 		switch {
@@ -840,12 +859,12 @@ func agoString(rfc3339 string) string {
 // prInfo is what pr-watch knows about a PR it lists: one of yours, or one you reviewed.
 type prInfo struct {
 	Title, URL, Branch, Author string
-	Reviewing                  bool
+	Reviewing, Draft           bool
 }
 
 func (m *model) prInfo(pr int) prInfo {
 	if s, ok := m.prs[strconv.Itoa(pr)]; ok {
-		return prInfo{Title: s.Title, URL: s.URL, Branch: s.Branch}
+		return prInfo{Title: s.Title, URL: s.URL, Branch: s.Branch, Draft: s.Draft}
 	}
 	for _, r := range m.reviewed {
 		if r.Number == pr {

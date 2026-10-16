@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -59,7 +60,8 @@ func worktreeFor(repoDir, branch string, pr int) (string, error) {
 	return path, git("worktree", "add", path, branch) // DWIM: tracks origin/<branch> when there's no local one
 }
 
-// openTab starts an interactive Claude session in a new tab of the zellij session pr-watch runs in.
+// openTab starts an interactive Claude session in the tab named title of the zellij session pr-watch runs in, or in a
+// new tab of that name.
 func openTab(title, dir string, claudeArgs ...string) error {
 	here := os.Getenv("ZELLIJ_SESSION_NAME")
 	if here == "" {
@@ -67,6 +69,18 @@ func openTab(title, dir string, claudeArgs ...string) error {
 	}
 	bin, err := exec.LookPath(claudeBin())
 	if err != nil {
+		return err
+	}
+	if id, ok := tabIDs(here)[title]; ok { // a tab of that name already: open the session there and show it
+		tab := strconv.Itoa(id)
+		pane, err := zellij(here, append([]string{"new-pane", "--tab-id", tab, "--cwd", dir, "--", bin}, claudeArgs...)...)
+		if err != nil {
+			return err
+		}
+		if _, err := zellij(here, "go-to-tab-by-id", tab); err != nil {
+			return err
+		}
+		_, err = zellij(here, "focus-pane-id", strings.TrimSpace(pane))
 		return err
 	}
 	_, err = zellij(here, append([]string{"new-tab", "--name", title, "--cwd", dir, "--", bin}, claudeArgs...)...)

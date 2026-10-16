@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -194,13 +195,17 @@ type tabMove struct {
 	Session Session
 	Stage   string
 	spot    paneSpot
-	Act     string // "move", "there" (already in its tab), "stay" (placed before), "wait" (you're in it), "skip"
+	Act     string // "move", "there" (in its tab), "stay" (placed before), "wait" (you're in it), "stuck", "skip"
 	Why     string
 }
 
-// plan decides what to do with each session. placed is the stage each session was last put in: a session moves only
-// when its stage changes, so a pane you moved by hand stays there until then.
-func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[string]string) []tabMove {
+// maxTries is how many rounds pr-watch asks for a move that doesn't happen before it gives up on that session.
+const maxTries = 3
+
+// plan decides what to do with each session. placed is the stage each session was last seen placed in: a session
+// moves only when its stage changes, so a pane you moved by hand stays there until then. tries counts the rounds a
+// move was asked for and hasn't happened.
+func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[string]string, tries map[string]int) []tabMove {
 	var moves []tabMove
 	for _, s := range sessions {
 		st := v.stage(s)
@@ -211,12 +216,14 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 			m.Act, m.Why = "skip", "doesn't work in the repo"
 		case !inZellij:
 			m.Act, m.Why = "skip", "not in a zellij pane"
+		case tabBase(spot.tab) == st:
+			m.Act, m.Why = "there", "in its tab"
 		case placed[s.SessionID] == st:
 			m.Act, m.Why = "stay", "placed before; moves again when its stage changes"
-		case tabBase(spot.tab) == st:
-			m.Act, m.Why = "there", "already in its tab"
 		case spot.focused:
 			m.Act, m.Why = "wait", "you're in it: moves once you leave it"
+		case tries[s.SessionID] >= maxTries:
+			m.Act, m.Why = "stuck", fmt.Sprintf("asked %d times, it didn't move", maxTries)
 		default:
 			m.Act, m.Why = "move", ""
 		}
@@ -225,45 +232,97 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 	return moves
 }
 
-// arrange carries out the plan and remembers where each session was put.
-func arrange(store Store, plugin string, moves []tabMove) (moved []tabMove, err error) {
+// arrange asks the plugin for the moves and records the sessions seen in their tab. A move counts once pr-watch sees
+// the pane in its tab, on a later round: the plugin moves panes one at a time, after answering.
+func arrange(store Store, plugin string, moves []tabMove, tries map[string]int) (asked, arrived []tabMove, err error) {
 	placed := store.TabsPlaced()
 	moves = slices.Clone(moves) // in stage order, so new tabs are created in that order too
 	slices.SortStableFunc(moves, func(a, b tabMove) int { return slices.Index(stageOrder, a.Stage) - slices.Index(stageOrder, b.Stage) })
+	byZellij := map[string][]tabMove{}
+	var sessions []string
 	for _, m := range moves {
 		switch m.Act {
 		case "there":
-			placed[m.Session.SessionID] = m.Stage
-		case "move":
-			if err = moveToTab(plugin, m.spot, m.Stage); err != nil {
-				return moved, err
+			if placed[m.Session.SessionID] != m.Stage && tries[m.Session.SessionID] > 0 {
+				arrived = append(arrived, m)
 			}
 			placed[m.Session.SessionID] = m.Stage
-			moved = append(moved, m)
+			delete(tries, m.Session.SessionID)
+		case "move":
+			if _, ok := byZellij[m.spot.zellij]; !ok {
+				sessions = append(sessions, m.spot.zellij)
+			}
+			byZellij[m.spot.zellij] = append(byZellij[m.spot.zellij], m)
 		}
 	}
-	return moved, store.SaveTabsPlaced(placed)
+	for _, zs := range sessions {
+		if err = moveToTabs(plugin, zs, byZellij[zs]); err != nil {
+			break
+		}
+		for _, m := range byZellij[zs] {
+			tries[m.Session.SessionID]++
+			asked = append(asked, m)
+		}
+	}
+	if serr := store.SaveTabsPlaced(placed); err == nil {
+		err = serr
+	}
+	return asked, arrived, err
 }
 
-// moveToTab asks the plugin to move the pane; zellij launches the plugin the first time.
-func moveToTab(plugin string, spot paneSpot, tab string) error {
+// moveToTabs asks the plugin to move these panes, one "<pane> <placeholder> <tab name>" line each; zellij launches
+// the plugin the first time. zellij 0.45.1 can't move a pane into most existing tabs, so for a tab that exists
+// pr-watch opens a placeholder pane in it, without focus, and the plugin replaces it with the pane; "-" sends the pane
+// to a new tab. A placeholder the plugin doesn't use closes by itself.
+func moveToTabs(plugin, zellijSession string, moves []tabMove) error {
 	if _, err := os.Stat(plugin); err != nil {
 		return fmt.Errorf("the tabs plugin isn't installed (%s): run make install", plugin)
 	}
+	ids := tabIDs(zellijSession)
+	var lines []string
+	for _, m := range moves {
+		placeholder := "-"
+		if id, ok := ids[m.Stage]; ok {
+			out, err := zellij(zellijSession, "new-pane", "--tab-id", strconv.Itoa(id), "--no-focus", "--close-on-exit",
+				"--name", "pr-watch is moving a session here", "--", "sleep", "20")
+			if err != nil {
+				return err
+			}
+			placeholder = strings.TrimPrefix(strings.TrimSpace(out), "terminal_")
+		}
+		lines = append(lines, m.spot.pane+" "+placeholder+" "+m.Stage)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "zellij", "--session", spot.zellij, "pipe", "--plugin", "file:"+plugin,
-		"--name", "move", "--", spot.pane+" "+tab).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "zellij", "--session", zellijSession, "pipe", "--plugin", "file:"+plugin,
+		"--name", "move", "--", strings.Join(lines, "\n")).CombinedOutput()
 	answer := strings.TrimSpace(string(out))
 	switch {
 	case ctx.Err() != nil:
 		return fmt.Errorf("the tabs plugin didn't answer: grant it its permissions in zellij")
 	case err != nil:
 		return fmt.Errorf("zellij pipe: %v %s", err, answer)
-	case strings.HasPrefix(answer, "error"):
-		return fmt.Errorf("tabs plugin: %s", answer)
+	case !strings.HasPrefix(answer, "queued"):
+		return fmt.Errorf("tabs plugin: %q", cmp.Or(answer, "no answer"))
 	}
 	return nil
+}
+
+// tabIDs is the ID of each tab of a zellij session, by its name without badges; the first tab of a name wins.
+func tabIDs(zellijSession string) map[string]int {
+	var tabs []struct {
+		Name  string `json:"name"`
+		TabID int    `json:"tab_id"`
+	}
+	ids := map[string]int{}
+	if out, err := zellij(zellijSession, "list-tabs", "--json"); err == nil && json.Unmarshal([]byte(out), &tabs) == nil {
+		for _, t := range tabs {
+			if _, ok := ids[tabBase(t.Name)]; !ok {
+				ids[tabBase(t.Name)] = t.TabID
+			}
+		}
+	}
+	return ids
 }
 
 // withBranches fills in the branch each session's worktree has checked out.
@@ -316,11 +375,11 @@ func printTabsPlan(store Store) error {
 		return err
 	}
 	sessions = withBranches(sessions)
-	moves := v.plan(sessions, locate(sessions), store.TabsPlaced())
+	moves := v.plan(sessions, locate(sessions), store.TabsPlaced(), nil)
 	fmt.Printf("%-24s %-10s %-22s %s\n", "SESSION", "STAGE", "NOW IN TAB", "WHAT HAPPENS")
 	for _, m := range moves {
-		what := map[string]string{"move": "moves to " + m.Stage, "there": "stays, already there", "stay": "stays: " + m.Why,
-			"wait": "moves to " + m.Stage + " once you leave it", "skip": "left alone: " + m.Why}[m.Act]
+		what := map[string]string{"move": "moves to " + m.Stage, "there": "stays, in its tab", "stay": "stays: " + m.Why,
+			"wait": "moves to " + m.Stage + " once you leave it", "stuck": "stuck: " + m.Why, "skip": "left alone: " + m.Why}[m.Act]
 		fmt.Printf("%-24s %-10s %-22s %s\n", m.Session.Name, m.Stage, m.spot.tab, what)
 	}
 	if !cfg.ArrangeTabs {

@@ -49,67 +49,87 @@ func TestPlan(t *testing.T) {
 	in := func(id string) Session {
 		return Session{SessionID: id, Name: id, Cwd: "/code/widgets", Branch: "feat/b"}
 	}
-	sessions := []Session{in("move"), in("there"), in("placed"), in("focused"), in("nozellij"), {SessionID: "out", Cwd: "/tmp"}}
+	sessions := []Session{in("move"), in("there"), in("placed"), in("focused"), in("stuck"), in("nozellij"), {SessionID: "out", Cwd: "/tmp"}}
 	spots := map[string]paneSpot{
 		"move": {pane: "1", tab: "Tab #2"}, "there": {pane: "2", tab: stageReview + " ✓"}, // cc-status's badge doesn't count
 		"placed": {pane: "3", tab: "somewhere you put it"}, "focused": {pane: "4", tab: "Tab #2", focused: true},
-		"out": {pane: "6", tab: "Tab #1"},
+		"stuck": {pane: "5", tab: "Tab #2"}, "out": {pane: "6", tab: "Tab #1"},
 	}
 	var acts []string
-	for _, m := range v.plan(sessions, spots, map[string]string{"placed": stageReview}) {
+	for _, m := range v.plan(sessions, spots, map[string]string{"placed": stageReview}, map[string]int{"stuck": maxTries}) {
 		acts = append(acts, m.Session.SessionID+":"+m.Act)
 	}
-	want := []string{"move:move", "there:there", "placed:stay", "focused:wait", "nozellij:skip", "out:skip"}
+	want := []string{"move:move", "there:there", "placed:stay", "focused:wait", "stuck:stuck", "nozellij:skip", "out:skip"}
 	if !slices.Equal(acts, want) {
 		t.Errorf("plan = %q, want %q", acts, want)
 	}
 }
 
-// arrange asks the plugin through zellij pipe and remembers where it put each session.
-func TestArrange(t *testing.T) {
+// fakeZellij answers zellij pipe like the plugin, list-tabs with tabs, and new-pane with pane 90. It records the
+// payloads it was piped in calls, and the new-pane commands in calls.new.
+func fakeZellij(t *testing.T, answer, tabs string) (plugin, calls string) {
+	t.Helper()
 	dir := t.TempDir()
-	plugin := filepath.Join(dir, "pr-watch-tabs.wasm")
+	plugin = filepath.Join(dir, "pr-watch-tabs.wasm")
 	os.WriteFile(plugin, []byte("wasm"), 0o644)
-	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\necho \"$@\" >> \""+dir+"/calls\"\necho moved\n"), 0o755)
+	calls = filepath.Join(dir, "calls")
+	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; echo terminal_90; exit;;\nesac\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	return plugin, calls
+}
+
+// A move counts once pr-watch sees the pane in its tab: the plugin moves panes one at a time, after answering.
+func TestArrange(t *testing.T) {
+	plugin, calls := fakeZellij(t, "queued 1", `[{"name":"Tab #1","tab_id":0},{"name":"In review ✓","tab_id":6}]`)
 	store := Store{Dir: t.TempDir()}
+	tries := map[string]int{}
+	a := Session{SessionID: "a", Name: "a"}
 	moves := []tabMove{
-		{Session: Session{SessionID: "a", Name: "a"}, Stage: stageReview, Act: "move", spot: paneSpot{zellij: "z", pane: "12"}},
+		{Session: a, Stage: stageReview, Act: "move", spot: paneSpot{zellij: "z", pane: "12"}},
 		{Session: Session{SessionID: "b"}, Stage: stageWIP, Act: "there"},
 		{Session: Session{SessionID: "c"}, Stage: stageDone, Act: "wait"},
 	}
-	moved, err := arrange(store, plugin, moves)
-	if err != nil || len(moved) != 1 {
-		t.Fatalf("moved %v, err %v", moved, err)
+	asked, arrived, err := arrange(store, plugin, moves, tries)
+	if err != nil || len(asked) != 1 || len(arrived) != 0 || tries["a"] != 1 {
+		t.Fatalf("asked %v, arrived %v, tries %v, err %v", asked, arrived, tries, err)
 	}
-	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
-	if got := strings.TrimSpace(string(calls)); got != "--session z pipe --plugin file:"+plugin+" --name move -- 12 In review" {
-		t.Errorf("zellij called with %q", got)
+	if got, _ := os.ReadFile(calls); string(got) != "z 12 90 In review\n--\n" {
+		t.Errorf("zellij pipe calls %q", got)
 	}
-	if p := store.TabsPlaced(); p["a"] != stageReview || p["b"] != stageWIP || p["c"] != "" {
-		t.Errorf("placed = %v", p)
+	if got, _ := os.ReadFile(calls + ".new"); !strings.Contains(string(got), "new-pane --tab-id 6 --no-focus") {
+		t.Errorf("the placeholder in In review: %q", got)
 	}
-	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\necho 'error: expected --name move'\n"), 0o755)
-	if _, err := arrange(store, plugin, moves[:1]); err == nil || !strings.Contains(err.Error(), "expected --name move") {
-		t.Errorf("a refusal from the plugin should surface: %v", err)
+	if p := store.TabsPlaced(); p["a"] != "" || p["b"] != stageWIP {
+		t.Errorf("placed after asking = %v: a isn't there yet", p)
+	}
+	// the next round sees it in its tab
+	_, arrived, err = arrange(store, plugin, []tabMove{{Session: a, Stage: stageReview, Act: "there"}}, tries)
+	if err != nil || len(arrived) != 1 || store.TabsPlaced()["a"] != stageReview || tries["a"] != 0 {
+		t.Errorf("arrived %v, placed %v, tries %v, err %v", arrived, store.TabsPlaced(), tries, err)
 	}
 }
 
-func TestArrangeCreatesTabsInStageOrder(t *testing.T) {
-	dir := t.TempDir()
-	plugin := filepath.Join(dir, "pr-watch-tabs.wasm")
-	os.WriteFile(plugin, []byte("wasm"), 0o644)
-	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\necho \"$7 $8 $9 ${10}\" >> \""+dir+"/calls\"\necho moved\n"), 0o755)
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+func TestArrangeAsksOncePerZellijSessionInStageOrder(t *testing.T) {
+	plugin, calls := fakeZellij(t, "queued 4", `[{"name":"WIP","tab_id":5},{"name":"WIP","tab_id":9}]`)
 	var moves []tabMove
 	for i, st := range []string{stageDone, stageWIP, stageReviewing, stageReview} {
 		moves = append(moves, tabMove{Session: Session{SessionID: st}, Stage: st, Act: "move", spot: paneSpot{zellij: "z", pane: strconv.Itoa(i)}})
 	}
-	if _, err := arrange(Store{Dir: t.TempDir()}, plugin, moves); err != nil {
+	if _, _, err := arrange(Store{Dir: t.TempDir()}, plugin, moves, map[string]int{}); err != nil {
 		t.Fatal(err)
 	}
-	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
-	if got := strings.Fields(strings.ReplaceAll(string(calls), "\n", " ")); !slices.Equal(got, []string{"move", "--", "1", "WIP", "move", "--", "3", "In", "review", "move", "--", "2", "Reviewing", "move", "--", "0", "Done"}) {
-		t.Errorf("calls in order: %q", got)
+	if got, _ := os.ReadFile(calls); string(got) != "z 1 90 WIP\n3 - In review\n2 - Reviewing\n0 - Done\n--\n" {
+		t.Errorf("one call, in stage order: %q", got)
+	}
+	if got, _ := os.ReadFile(calls + ".new"); strings.Count(string(got), "new-pane") != 1 || !strings.Contains(string(got), "--tab-id 5 ") {
+		t.Errorf("one placeholder, in the first WIP tab: %q", got)
+	}
+}
+
+func TestArrangeNeedsThePluginsAnswer(t *testing.T) {
+	plugin, _ := fakeZellij(t, "", "[]")
+	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageWIP, Act: "move", spot: paneSpot{zellij: "z", pane: "1"}}}
+	if _, _, err := arrange(Store{Dir: t.TempDir()}, plugin, moves, map[string]int{}); err == nil || !strings.Contains(err.Error(), "no answer") {
+		t.Errorf("an empty answer must not count as done: %v", err)
 	}
 }

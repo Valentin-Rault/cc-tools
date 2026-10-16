@@ -504,7 +504,11 @@ func (m *model) help() string {
 	e := map[bool]string{true: "  e close", false: "  e details"}[m.expanded]
 	switch m.panel() {
 	case panelMine:
-		return " ←→ lists  ↑↓ move  ⏎ open" + e + "  o owner  s send  g go to owner  x purge  tab events" + common
+		q := "  m merge"
+		if prs := m.prList(); m.cursor[panelMine] < len(prs) && m.prs[strconv.Itoa(prs[m.cursor[panelMine]])].Queued {
+			q = "  m unqueue"
+		}
+		return " ←→ lists  ↑↓ move  ⏎ open" + e + q + "  o owner  s send  g go to owner  x purge  tab events" + common
 	case panelReview:
 		return " ←→ lists  ↑↓ move  ⏎ open for review" + e + "  tab events" + common
 	case panelReviewed:

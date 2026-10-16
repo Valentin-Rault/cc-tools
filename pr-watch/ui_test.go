@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -488,5 +489,58 @@ func TestFirstLine(t *testing.T) {
 	}
 	if got := firstLine(strings.Repeat("x", 120)); len([]rune(got)) != 100 || !strings.HasSuffix(got, "…") {
 		t.Errorf("long line = %q", got)
+	}
+}
+
+// m adds one of your PRs to the merge queue; m on a queued one takes it out, which undoes a mistake.
+func TestMergeQueueToggle(t *testing.T) {
+	m := testModel(t)
+	gh := &fakeGitHub{}
+	m.w.gh = gh
+	set := func(n string, f func(*Stored)) { s := m.prs[n]; f(&s); m.prs[n] = s }
+	set("2720", func(s *Stored) { s.NodeID, s.Head = "PR_a", "abc123" })
+	set("2740", func(s *Stored) { s.NodeID = "PR_b" })
+	m.store.write("hot-until", "0")
+	run := func() {
+		t.Helper()
+		cmd := m.toggleQueue(m.selectedPR())
+		if cmd == nil {
+			t.Fatalf("no command; flash %q", m.flash)
+		}
+		m.Update(cmd())
+	}
+
+	m.cursor[panelMine] = 2 // #2720, not queued
+	if !strings.Contains(m.help(), "m merge") {
+		t.Errorf("help = %q", m.help())
+	}
+	run()
+	if !slices.Equal(gh.queued, []string{"enqueue PR_a abc123"}) || !strings.Contains(m.flash, "added to the merge queue · m again takes it out") {
+		t.Errorf("calls %q, flash %q", gh.queued, m.flash)
+	}
+	if !m.store.HotUntil().After(time.Now()) {
+		t.Error("queueing a PR should watch closely")
+	}
+
+	m.cursor[panelMine] = 0 // #2740, queued
+	if !strings.Contains(m.help(), "m unqueue") {
+		t.Errorf("help = %q", m.help())
+	}
+	run()
+	if gh.queued[1] != "dequeue PR_b" || m.store.read("dequeued") != "2740" || !strings.Contains(m.flash, "taken out of the merge queue") {
+		t.Errorf("calls %q, dequeued %q, flash %q", gh.queued, m.store.read("dequeued"), m.flash)
+	}
+
+	gh.queueErr = errors.New("Pull request is not mergeable")
+	m.cursor[panelMine] = 2
+	run()
+	if !strings.Contains(m.flash, "#2720: Pull request is not mergeable") {
+		t.Errorf("flash = %q", m.flash)
+	}
+
+	m.reviewed = []ReviewedPR{{Number: 2757}}
+	press(m, "right", "right")
+	if m.toggleQueue(m.selectedPR()) != nil || !strings.Contains(m.flash, "your own PRs") {
+		t.Errorf("m on someone else's PR: flash %q", m.flash)
 	}
 }

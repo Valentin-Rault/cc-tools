@@ -39,7 +39,9 @@ its owner. *To review* shows each PR's status in one icon (`⧗` already in the 
 how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
 `security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
 requested; Nerd Font icons, which Ghostty ships). `e` opens a pane beside the lists with more about the selected
-PR: its status, reviews, size, how long it has waited, its latest events. *Reviewed* lists the open PRs
+PR: its status, reviews, size, how long it has waited, its latest events. `m` adds one of your PRs to the merge
+queue, at the commit you see; `m` on a queued one takes it out again, so a slip is one key to undo. pr-watch doesn't
+merge directly: that can't be undone. *Reviewed* lists the open PRs
 of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in
 your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review. A
 PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen.
@@ -144,7 +146,7 @@ focus glow.
 ## pr-guard
 
 A `PreToolUse` hook for `Bash`. It denies merging a PR, adding it to the merge queue and enabling auto-merge, in
-every session. Everything else, pushes and PR comments included, goes through as usual.
+every session; `m` in pr-watch is how you queue your own PRs. Everything else, pushes and PR comments included, goes through as usual.
 
 ```json
 "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/pr-guard.sh", "timeout": 10 }] }]

@@ -11,16 +11,18 @@ import (
 	"github.com/cli/go-gh/v2/pkg/api"
 )
 
-// GitHub is what the watcher needs from the API; tests swap in a fake.
+// GitHub is what pr-watch needs from the API; tests swap in a fake.
 type GitHub interface {
 	Login() (string, error)
 	Search(repo, me string) (*searchData, error)
 	Notifications(repo, lastModified string) (*notifications, error)
+	Enqueue(prID, head string) error // add a PR to its merge queue, if its head is still head
+	Dequeue(prID string) error       // take it out again
 }
 
 const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
-    number title url isDraft headRefName headRefOid reviewDecision mergeQueueEntry { state }
+    id number title url isDraft headRefName headRefOid reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
       ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
     reviews(last: 20) { nodes { id state url bodyText author { login } } }
@@ -49,6 +51,7 @@ type searchData struct {
 }
 
 type prNode struct {
+	ID              string // the node ID the merge queue mutations take
 	Number          int
 	Title           string
 	URL             string
@@ -189,6 +192,19 @@ func (c *ghClient) Search(repo, me string) (*searchData, error) {
 		"me":       me,
 	}, &d)
 	return &d, err
+}
+
+// Enqueue adds the PR to its merge queue. head is the commit you saw: GitHub refuses if the PR moved on since.
+func (c *ghClient) Enqueue(prID, head string) error {
+	return c.gql.Do(`mutation($id: ID!, $head: GitObjectID) {
+  enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { position } }
+}`, map[string]any{"id": prID, "head": head}, &struct{}{})
+}
+
+// Dequeue takes the PR out of its merge queue.
+func (c *ghClient) Dequeue(prID string) error {
+	return c.gql.Do(`mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }`,
+		map[string]any{"id": prID}, &struct{}{})
 }
 
 // Notifications is a conditional request: GitHub answers 304 for free while nothing changed.

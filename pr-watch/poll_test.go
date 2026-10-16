@@ -13,8 +13,20 @@ import (
 
 // fakeGitHub answers with canned state, like the fake gh the bash test.sh put on PATH.
 type fakeGitHub struct {
-	search *searchData
-	notifs *notifications
+	search   *searchData
+	notifs   *notifications
+	queueErr error
+	queued   []string // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
+}
+
+func (f *fakeGitHub) Enqueue(prID, head string) error {
+	f.queued = append(f.queued, "enqueue "+prID+" "+head)
+	return f.queueErr
+}
+
+func (f *fakeGitHub) Dequeue(prID string) error {
+	f.queued = append(f.queued, "dequeue "+prID)
+	return f.queueErr
 }
 
 func (f *fakeGitHub) Login() (string, error) { return "me", nil }
@@ -266,5 +278,22 @@ func TestApprovedReviewRequestsGoLast(t *testing.T) {
 	}
 	if r.ToReview[1].Security != "approved" || len(r.ToReview[2].ApprovedBy) != 1 {
 		t.Errorf("to review = %+v", r.ToReview)
+	}
+}
+
+// Taking your PR out of the merge queue from the TUI isn't news for its session.
+func TestYourOwnDequeueIsNoEvent(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.SaveSnapshot(map[string]Stored{"1": {Branch: "b1", Head: "abcdef1234", CI: "FAILURE", Queued: true,
+		Seen: []string{"R0", "R1", "R2", "C3", "C4"}}})
+	store.write("dequeued", "1")
+	w, _, _ := newTestWatcher(t, store)
+	for _, e := range w.Poll(false).Events {
+		if strings.HasPrefix(e.Text, "left-merge-queue") {
+			t.Errorf("event for your own dequeue: %+v", e)
+		}
+	}
+	if store.read("dequeued") != "" {
+		t.Errorf("dequeued = %q, want it cleared once GitHub shows the PR out of the queue", store.read("dequeued"))
 	}
 }

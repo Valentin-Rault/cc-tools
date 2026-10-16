@@ -18,7 +18,8 @@ import (
 const hotFor = 10 * time.Minute
 
 // Store is the state directory, shared with `pr-watch claim` run from Claude sessions. One small file per concern:
-// owners, snapshot.json, reviewed.json, pending.json, events.log, notified, since, last-modified, hot-until, refs, retry, me, pid.
+// owners, snapshot.json, reviewed.json, pending.json, events.log, notified, since, last-modified, hot-until, refs, retry, me, pid,
+// dequeued (PRs you took out of the merge queue from the TUI, so that isn't an event).
 type Store struct{ Dir string }
 
 func (s Store) path(name string) string { return filepath.Join(s.Dir, name) }

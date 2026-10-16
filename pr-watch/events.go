@@ -11,6 +11,7 @@ import (
 
 // PR is one of your open pull requests, reduced to what pr-watch acts on.
 type PR struct {
+	NodeID                   string
 	Number                   int
 	Title, URL, Branch, Head string
 	Draft, Queued            bool
@@ -25,6 +26,7 @@ type Item struct{ ID, URL, Who, Kind, Note string } // Note: a review's comment,
 
 // Stored is what the snapshot keeps per PR between refreshes: the bash poller's fields plus the ones the TUI shows.
 type Stored struct {
+	NodeID  string   `json:"id,omitempty"`
 	Branch  string   `json:"branch"`
 	Head    string   `json:"head"`
 	CI      string   `json:"ci"`
@@ -71,7 +73,7 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 		if n.Number == 0 { // a search hit that isn't a pull request
 			continue
 		}
-		p := PR{Number: n.Number, Title: n.Title, URL: n.URL, Branch: n.HeadRefName, Head: n.HeadRefOid,
+		p := PR{NodeID: n.ID, Number: n.Number, Title: n.Title, URL: n.URL, Branch: n.HeadRefName, Head: n.HeadRefOid,
 			Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
 		if len(n.Commits.Nodes) > 0 {
 			if ci := n.Commits.Nodes[0].Commit.StatusCheckRollup; ci != nil {
@@ -143,7 +145,7 @@ func snapshot(prs []PR) map[string]Stored {
 		for _, it := range p.Items {
 			seen = append(seen, it.ID)
 		}
-		snap[strconv.Itoa(p.Number)] = Stored{Branch: p.Branch, Head: p.Head, CI: p.CI, Queued: p.Queued, Seen: seen,
+		snap[strconv.Itoa(p.Number)] = Stored{NodeID: p.NodeID, Branch: p.Branch, Head: p.Head, CI: p.CI, Queued: p.Queued, Seen: seen,
 			Title: p.Title, URL: p.URL, Draft: p.Draft, Review: p.Review, Failing: p.Failing, Reviews: latestReviews(p.Items)}
 	}
 	return snap

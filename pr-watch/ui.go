@@ -39,7 +39,12 @@ type (
 		hadPrev bool
 		err     error
 	}
-	jumpMsg struct{ err error }
+	jumpMsg   struct{ err error }
+	queuedMsg struct {
+		pr     int
+		queued bool // true: added to the merge queue; false: taken out
+		err    error
+	}
 )
 
 // The panels: the top area shows one of the three PR lists, the events panel sits below it.
@@ -263,6 +268,21 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "jump: " + msg.err.Error()
 		}
 
+	case queuedMsg:
+		switch {
+		case msg.err != nil:
+			m.flash = fmt.Sprintf("#%d: %v", msg.pr, msg.err)
+		case msg.queued:
+			m.flash = fmt.Sprintf("#%d added to the merge queue · m again takes it out", msg.pr)
+			m.log(msg.pr, "added to the merge queue from pr-watch")
+		default:
+			m.flash = fmt.Sprintf("#%d taken out of the merge queue", msg.pr)
+			m.log(msg.pr, "taken out of the merge queue from pr-watch")
+		}
+		if msg.err == nil {
+			m.store.Hot() // look again soon, and keep watching while the queue works
+		}
+
 	case tea.KeyPressMsg:
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
@@ -343,6 +363,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		m.purge()
 	case "e":
 		m.expanded = !m.expanded
+	case "m":
+		return m, m.toggleQueue(m.selectedPR())
 	case "o", "s", "g":
 		pr := m.selectedPR()
 		if pr == 0 {
@@ -813,4 +835,32 @@ func (m *model) likelyReviewer(pr int) (mention, bool) {
 		return mention{}, false
 	}
 	return ms[0], true
+}
+
+// toggleQueue adds one of your PRs to the merge queue, or takes it out if it's queued, so m again undoes a mistake.
+// It queues the head you see: GitHub refuses if the PR moved on since.
+func (m *model) toggleQueue(pr int) tea.Cmd {
+	s, mine := m.prs[strconv.Itoa(pr)]
+	switch {
+	case !mine:
+		m.flash = "m queues your own PRs: select one in My PRs"
+		return nil
+	case s.NodeID == "":
+		m.flash = "pr-watch doesn't know this PR's ID yet: refresh with r first"
+		return nil
+	case m.w == nil || m.w.gh == nil:
+		return nil
+	}
+	gh, store, queued := m.w.gh, m.store, s.Queued
+	m.flash = fmt.Sprintf(map[bool]string{true: "taking #%d out of the merge queue…", false: "adding #%d to the merge queue…"}[queued], pr)
+	return func() tea.Msg {
+		if queued {
+			err := gh.Dequeue(s.NodeID)
+			if err == nil { // your own doing: the refresh that sees it leave mustn't make it an event
+				store.appendLine("dequeued", strconv.Itoa(pr))
+			}
+			return queuedMsg{pr, false, err}
+		}
+		return queuedMsg{pr, true, gh.Enqueue(s.NodeID, s.Head)}
+	}
 }

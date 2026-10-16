@@ -11,6 +11,7 @@ import (
 	"path"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -163,6 +164,18 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 	oldReviewed, ok := w.store.ReviewedSnapshot()
 	if ok {
 		events = append(events, diffReviewed(oldReviewed, reviewed, now)...)
+	}
+	if own := w.store.lines("dequeued"); len(own) > 0 { // you took these out of the queue yourself: no event for it
+		events = slices.DeleteFunc(events, func(e Event) bool {
+			return strings.HasPrefix(e.Text, "left-merge-queue") && slices.Contains(own, strconv.Itoa(e.PR))
+		})
+		var still []string // GitHub may not show the change yet
+		for _, pr := range own {
+			if s, ok := snap[pr]; ok && s.Queued {
+				still = append(still, pr)
+			}
+		}
+		w.store.write("dequeued", strings.Join(still, "\n"))
 	}
 	newReviewed := reviewedSnapshot(reviewed)
 	if err := w.store.SaveReviewedSnapshot(newReviewed); err != nil {

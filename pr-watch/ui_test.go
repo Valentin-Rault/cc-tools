@@ -467,6 +467,22 @@ func TestApprovalsAreForYou(t *testing.T) {
 	}
 }
 
+func TestConflictsShow(t *testing.T) {
+	m := testModel(t)
+	s := m.prs["2731"]
+	s.Conflicts, s.Base = true, "main"
+	m.prs["2731"] = s
+	m.width, m.height = 150, 24
+	if v := screen(m); !strings.Contains(v, "◐ ⚠ conflicts") || !strings.Contains(v, "1 conflicting") {
+		t.Errorf("the row and the footer show the conflict:\n%s", v)
+	}
+	m.cursor[panelMine] = 1 // #2731
+	press(m, "e")
+	if v := screen(m); !strings.Contains(v, "⚠ conflicts with main") {
+		t.Errorf("details lack the conflict:\n%s", v)
+	}
+}
+
 func TestDetailsListReviewsWithTheirComment(t *testing.T) {
 	m := testModel(t)
 	s := m.prs["2720"]

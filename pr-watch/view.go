@@ -183,6 +183,9 @@ func (m *model) ciCell(s Stored) string {
 	if c == "" {
 		c = comment.Render("·")
 	}
+	if s.Conflicts {
+		c += " " + orange.Render("⚠ conflicts")
+	}
 	if len(s.Failing) > 0 {
 		c += " " + red.Render(strings.Join(s.Failing, ", "))
 	}
@@ -323,7 +326,7 @@ var kinds = map[string]struct {
 	style lipgloss.Style
 }{
 	"ci-failed": {"✗", red}, "changes-requested": {"◆", orange}, "review": {"◇", blue},
-	"comment": {"✎", cyan}, "left-merge-queue": {"↩", yellow},
+	"comment": {"✎", cyan}, "left-merge-queue": {"↩", yellow}, "conflicts": {"⚠", orange},
 	"reply": {"↳", cyan}, "pushed": {"↑", yellow}, "asked-again": {"↻", yellow}, // on PRs you reviewed
 	"approved": {"✓", green},
 }
@@ -418,10 +421,13 @@ func (m *model) statusLine(w int) string {
 	case m.flash != "" && time.Since(m.flashAt) < 6*time.Second:
 		middle = bar.Foreground(fg2Color).Render("  " + m.flash)
 	default:
-		failing, queued := 0, 0
+		failing, conflicting, queued := 0, 0, 0
 		for _, s := range m.prs {
 			if s.CI == "FAILURE" || s.CI == "ERROR" {
 				failing++
+			}
+			if s.Conflicts {
+				conflicting++
 			}
 			if s.Queued {
 				queued++
@@ -437,7 +443,7 @@ func (m *model) statusLine(w int) string {
 			}
 		}
 		middle = bar.Render("  ") + count(len(m.prs), text, " open   ") + count(failing, red, " failing   ") +
-			count(queued, cyan, " queued   ") + count(len(m.toReview), blue, " to review   ") + count(again, fg(magentaColor), " to re-review")
+			map[bool]string{true: count(conflicting, orange, " conflicting   ")}[conflicting > 0] + count(queued, cyan, " queued   ") + count(len(m.toReview), blue, " to review   ") + count(again, fg(magentaColor), " to re-review")
 	}
 
 	right := segment.Render(" " + m.cfg.Repo + " ")
@@ -638,6 +644,9 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 		status := []string{rail(s)}
 		if s.Queued {
 			status = append(status, cyan.Render("⧗ in the merge queue"))
+		}
+		if s.Conflicts {
+			status = append(status, orange.Render("⚠ conflicts with "+cmp.Or(s.Base, "its base")))
 		}
 		field("status", status...)
 		checks := checksText(s.CI)

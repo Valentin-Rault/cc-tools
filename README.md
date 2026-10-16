@@ -35,8 +35,8 @@ make test
 ```
 
 It's drawn in tokyonight night on its own background, like an editor colorscheme, so it needs a terminal with true
-colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks and
-its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
+colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks,
+`⚠ conflicts` when it has merge conflicts, and its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
 how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
 `security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
 requested; Nerd Font icons, which Ghostty ships). `e` opens a pane beside the lists with more about the selected
@@ -78,8 +78,8 @@ preselected) and two ways to start one in a new zellij tab, with the PR's waitin
 - **new Claude session**: `claude --session-id <new id> -n pr-<n>` in the worktree that has the PR's branch checked
   out, or in a new one next to `repo_dir` (`<repo_dir>-pr-<n>`) when none has.
 
-When something happens on a PR (CI fails, changes are requested, a review or comment arrives, it leaves the merge
-queue), pr-watch sends the owner one message per PR. An approval is only shown, marked *for you*, with the first line
+When something happens on a PR (CI fails, it gets merge conflicts, changes are requested, a review or comment
+arrives, it leaves the merge queue), pr-watch sends the owner one message per PR. An approval is only shown, marked *for you*, with the first line
 of its comment: press `s` on it if the comment asks for something and it should go to the session. Only a Claude session can call `SendMessage`, so pr-watch
 starts a headless one for each send:
 
@@ -98,6 +98,8 @@ nothing changed). Your PRs are refreshed with one GraphQL query only when a noti
 queued or has pending CI, you pushed one of their branches (the local `origin/<branch>` refs moved), or a claim
 just came in. GitHub doesn't notify you about your own actions, so pr-watch also refreshes every 5 minutes, and
 every minute for 10 minutes after you open a PR from it (`⏎`), when you're likely about to review, merge or comment.
+Merge conflicts, usually from someone else's merge, come with no notification either: a refresh finds them, and
+while GitHub is still working out whether a PR conflicts, pr-watch asks again every poll.
 A refresh costs about 13 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list and as one macOS
 notification each.
 

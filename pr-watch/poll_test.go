@@ -44,6 +44,7 @@ func (f *fakeGitHub) Notifications(string, string) (*notifications, error) {
 
 const fixture = `{"mine": {"nodes": [
   {"number": 1, "title": "Add widgets", "url": "https://gh/pr/1", "headRefName": "b1", "headRefOid": "abcdef1234", "mergeQueueEntry": null,
+   "baseRefName": "main", "mergeable": "CONFLICTING",
    "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE", "contexts": {"nodes": [
      {"name": "lint", "conclusion": "FAILURE"}, {"name": "tests", "conclusion": "SUCCESS"}, {"name": "slow", "conclusion": null},
      {"context": "deploy", "state": "ERROR"}]}}}}]},
@@ -106,6 +107,7 @@ func TestPollEventsAgainstSnapshot(t *testing.T) {
 	}
 	want := []string{
 		"#1 ci-failed on abcdef1: lint, deploy https://gh/pr/1/checks",
+		"#1 conflicts with main https://gh/pr/1",
 		"#1 changes-requested by alice u/R1",
 		"#1 approved by carol: Looks good, one nit about naming. u/R2",
 		"#1 comment by dave u/C3",
@@ -128,7 +130,7 @@ func TestPollEventsAgainstSnapshot(t *testing.T) {
 	if got := snap["1"].Seen; !slices.Equal(got, []string{"R0", "R1", "R2", "C3", "C4"}) {
 		t.Errorf("seen for #1 = %q", got)
 	}
-	if !snap["2"].Draft || snap["2"].CI != "NONE" || snap["1"].Title != "Add widgets" {
+	if !snap["2"].Draft || snap["2"].CI != "NONE" || snap["1"].Title != "Add widgets" || !snap["1"].Conflicts || snap["2"].Conflicts {
 		t.Errorf("snapshot fields: %+v", snap)
 	}
 	if len(*notified) != 0 {
@@ -148,6 +150,26 @@ func TestPollEventsAgainstSnapshot(t *testing.T) {
 	// nothing changed: the same state again yields no events
 	if r := w.Poll(true); len(r.Events) != 0 {
 		t.Errorf("repeat poll: %q", eventLines(r.Events))
+	}
+}
+
+// A conflict is an event once: GitHub answering UNKNOWN while it works the merge out again doesn't make it new.
+func TestConflictsAreAnEventOnce(t *testing.T) {
+	var snap map[string]Stored
+	var got []string
+	for i, mergeable := range []string{"MERGEABLE", "CONFLICTING", "UNKNOWN", "CONFLICTING", "MERGEABLE", "UNKNOWN", "CONFLICTING"} {
+		prs := []PR{{Number: 5, URL: "https://gh/pr/5", Base: "main", Mergeable: mergeable}}
+		for _, e := range diff(snap, prs, time.Time{}) {
+			got = append(got, strconv.Itoa(i)+" "+e.Text)
+		}
+		snap = snapshot(snap, prs)
+		if busy(snap) != (mergeable == "UNKNOWN") {
+			t.Errorf("step %d (%s): busy = %v; only UNKNOWN asks again on the next poll", i, mergeable, busy(snap))
+		}
+	}
+	want := []string{"1 conflicts with main https://gh/pr/5", "6 conflicts with main https://gh/pr/5"}
+	if !slices.Equal(got, want) {
+		t.Errorf("events %q, want %q", got, want)
 	}
 }
 

@@ -156,7 +156,7 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 	if w.snap != nil { // the very first refresh only sets the baseline
 		events = diff(w.snap, prs, now)
 	}
-	snap := snapshot(prs)
+	snap := snapshot(w.snap, prs)
 	if err := w.store.SaveSnapshot(snap); err != nil {
 		return nil, nil, fmt.Errorf("saving the snapshot: %w", err)
 	}
@@ -229,10 +229,11 @@ func (w *Watcher) pushedRefs() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// busy: a queued PR or pending CI is about to change, so it's worth refreshing every poll.
+// busy: a queued PR or pending CI is about to change, or GitHub is still working out whether a PR has merge
+// conflicts (asking is what starts it), so it's worth refreshing every poll.
 func busy(snap map[string]Stored) bool {
 	for _, s := range snap {
-		if s.Queued || s.CI == "PENDING" || s.CI == "EXPECTED" {
+		if s.Queued || s.CI == "PENDING" || s.CI == "EXPECTED" || s.Mergeable == "UNKNOWN" {
 			return true
 		}
 	}

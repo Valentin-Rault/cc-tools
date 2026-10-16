@@ -22,7 +22,7 @@ type GitHub interface {
 
 const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
-    id number title url isDraft headRefName headRefOid reviewDecision mergeQueueEntry { state }
+    id number title url isDraft headRefName headRefOid baseRefName mergeable reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
       ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
     reviews(last: 20) { nodes { id state url bodyText author { login } } }
@@ -58,6 +58,8 @@ type prNode struct {
 	IsDraft         bool
 	HeadRefName     string
 	HeadRefOid      string
+	BaseRefName     string
+	Mergeable       string // MERGEABLE, CONFLICTING, or UNKNOWN while GitHub works it out
 	ReviewDecision  string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or empty
 	MergeQueueEntry *struct{ State string }
 	Commits         struct {

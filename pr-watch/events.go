@@ -14,7 +14,9 @@ type PR struct {
 	NodeID                   string
 	Number                   int
 	Title, URL, Branch, Head string
+	Base                     string // the branch it merges into
 	Draft, Queued            bool
+	Mergeable                string   // MERGEABLE, CONFLICTING, or UNKNOWN while GitHub works it out
 	Review                   string   // GitHub's review decision: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or empty
 	CI                       string   // rollup state: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED, or NONE without checks
 	Failing                  []string // names of the failed checks
@@ -38,6 +40,10 @@ type Stored struct {
 	Review  string   `json:"review,omitempty"`
 	Failing []string `json:"failing,omitempty"`
 	Reviews []Item   `json:"reviews,omitempty"` // each reviewer's latest review, for the details pane
+	Base    string   `json:"base,omitempty"`
+	// Mergeable is GitHub's last answer (UNKNOWN: ask again soon); Conflicts is the last answer that wasn't UNKNOWN
+	Mergeable string `json:"mergeable,omitempty"`
+	Conflicts bool   `json:"conflicts,omitempty"`
 }
 
 type Status string
@@ -74,7 +80,7 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 			continue
 		}
 		p := PR{NodeID: n.ID, Number: n.Number, Title: n.Title, URL: n.URL, Branch: n.HeadRefName, Head: n.HeadRefOid,
-			Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
+			Base: n.BaseRefName, Mergeable: n.Mergeable, Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
 		if len(n.Commits.Nodes) > 0 {
 			if ci := n.Commits.Nodes[0].Commit.StatusCheckRollup; ci != nil {
 				p.CI = ci.State
@@ -119,6 +125,9 @@ func diff(old map[string]Stored, prs []PR, at time.Time) []Event {
 		if (p.CI == "FAILURE" || p.CI == "ERROR") && (p.CI != q.CI || p.Head != q.Head) {
 			add(p.Number, "ci-failed on %s: %s %s/checks", p.Head[:min(7, len(p.Head))], strings.Join(p.Failing, ", "), p.URL)
 		}
+		if p.Mergeable == "CONFLICTING" && !q.Conflicts { // once per conflict: UNKNOWN in between doesn't count
+			add(p.Number, "conflicts with %s %s", cmp.Or(p.Base, "its base"), p.URL)
+		}
 		for _, it := range p.Items {
 			if it.Kind == "" || slices.Contains(q.Seen, it.ID) {
 				continue
@@ -138,15 +147,17 @@ func diff(old map[string]Stored, prs []PR, at time.Time) []Event {
 	return events
 }
 
-func snapshot(prs []PR) map[string]Stored {
+func snapshot(old map[string]Stored, prs []PR) map[string]Stored {
 	snap := map[string]Stored{}
 	for _, p := range prs {
+		q := old[strconv.Itoa(p.Number)]
 		seen := []string{}
 		for _, it := range p.Items {
 			seen = append(seen, it.ID)
 		}
 		snap[strconv.Itoa(p.Number)] = Stored{NodeID: p.NodeID, Branch: p.Branch, Head: p.Head, CI: p.CI, Queued: p.Queued, Seen: seen,
-			Title: p.Title, URL: p.URL, Draft: p.Draft, Review: p.Review, Failing: p.Failing, Reviews: latestReviews(p.Items)}
+			Title: p.Title, URL: p.URL, Draft: p.Draft, Review: p.Review, Failing: p.Failing, Reviews: latestReviews(p.Items),
+			Base: p.Base, Mergeable: p.Mergeable, Conflicts: p.Mergeable == "CONFLICTING" || p.Mergeable != "MERGEABLE" && q.Conflicts}
 	}
 	return snap
 }

@@ -367,7 +367,7 @@ func printTabsPlan(store Store) error {
 	}
 	reviewed := reviewedPRs(d.Reviewed.Nodes, me, cfg.Ignore)
 	links, mentions := newLinkIndex(cfg.Repo).update()
-	v := tabView{prs: snapshot(normalize(d.Mine.Nodes, me, cfg.Ignore)), reviewed: reviewed,
+	v := tabView{prs: snapshot(nil, normalize(d.Mine.Nodes, me, cfg.Ignore)), reviewed: reviewed,
 		toReview: reviewRequests(d.Review.Nodes, reviewed, me, cfg.SecurityTeam), owners: store.Owners(),
 		links: links, mentions: mentions, repoDirs: repoDirs(cfg.RepoDir)}
 	sessions, err := liveSessions()

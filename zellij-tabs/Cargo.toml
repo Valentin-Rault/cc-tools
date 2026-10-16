@@ -1,0 +1,13 @@
+[package]
+name = "pr-watch-tabs"
+version = "0.1.0"
+edition = "2021"
+description = "A zellij plugin that moves panes to tabs by name when pr-watch asks, through zellij pipe"
+license = "MIT"
+
+[dependencies]
+zellij-tile = "0.45.1"
+
+[profile.release]
+opt-level = "s"
+lto = true

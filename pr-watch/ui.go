@@ -39,7 +39,11 @@ type (
 		hadPrev bool
 		err     error
 	}
-	jumpMsg   struct{ err error }
+	jumpMsg struct{ err error }
+	tabsMsg struct {
+		moved []tabMove
+		err   error
+	}
 	queuedMsg struct {
 		pr     int
 		queued bool // true: added to the merge queue; false: taken out
@@ -73,7 +77,9 @@ type model struct {
 	inflight map[int]bool
 
 	auto, paused, polling, linking bool
-	expanded                       bool // e: the details pane is open
+	arranging                      bool   // a round of tab moves is running
+	tabsErr                        string // the last error from it, shown once
+	expanded                       bool   // e: the details pane is open
 	nextPoll, hotUntil             time.Time
 	ticks                          int
 	err                            error
@@ -149,11 +155,22 @@ func tick() tea.Cmd {
 func sessionsCmd() tea.Cmd {
 	return func() tea.Msg {
 		sessions, err := liveSessions()
-		for i := range sessions {
-			out, _ := exec.Command("git", "-C", sessions[i].Cwd, "branch", "--show-current").Output()
-			sessions[i].Branch = strings.TrimSpace(string(out))
-		}
-		return sessionsMsg{sessions, err}
+		return sessionsMsg{withBranches(sessions), err}
+	}
+}
+
+// arrangeTabs moves sessions whose stage changed to its tab, when arrange_tabs is on; one round at a time.
+func (m *model) arrangeTabs() tea.Cmd {
+	if !m.cfg.ArrangeTabs || m.arranging || m.prs == nil || m.links == nil {
+		return nil
+	}
+	m.arranging = true
+	v := tabView{prs: m.prs, reviewed: m.reviewed, toReview: m.toReview, owners: m.owners, links: m.links, mentions: m.mentions}
+	sessions, store, cfg := m.sessions, m.store, m.cfg
+	return func() tea.Msg {
+		v.repoDirs = repoDirs(cfg.RepoDir)
+		moved, err := arrange(store, cfg.TabsPlugin, v.plan(sessions, locate(sessions), store.TabsPlaced()))
+		return tabsMsg{moved, err}
 	}
 }
 
@@ -215,7 +232,18 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessions = msg.sessions
 			m.pinOwners()
 		}
-		return m, m.dispatch()
+		return m, tea.Batch(m.dispatch(), m.arrangeTabs())
+
+	case tabsMsg:
+		m.arranging = false
+		for _, mv := range msg.moved {
+			m.flash = fmt.Sprintf("moved %s to the %s tab", mv.Session.Name, mv.Stage)
+			m.store.appendLine("events.log", fmt.Sprintf("%s %s moved to the %s tab", time.Now().UTC().Format(time.RFC3339), mv.Session.Name, mv.Stage))
+		}
+		if e := fmt.Sprint(msg.err); msg.err != nil && e != m.tabsErr {
+			m.flash = "tabs: " + e
+		}
+		m.tabsErr = map[bool]string{true: fmt.Sprint(msg.err), false: ""}[msg.err != nil]
 
 	case linksMsg:
 		m.linking, m.links, m.mentions = false, msg.links, msg.mentions
@@ -829,8 +857,10 @@ func (m *model) prInfo(pr int) prInfo {
 
 // likelyReviewer is the session that named the PR most, when it clearly stands out: at least 3 times, and twice as
 // often as any other. It may not be running anymore.
-func (m *model) likelyReviewer(pr int) (mention, bool) {
-	ms := m.mentions[pr]
+func (m *model) likelyReviewer(pr int) (mention, bool) { return clearReviewer(m.mentions, pr) }
+
+func clearReviewer(mentions map[int][]mention, pr int) (mention, bool) {
+	ms := mentions[pr]
 	if len(ms) == 0 || ms[0].Count < 3 || len(ms) > 1 && ms[0].Count < 2*ms[1].Count {
 		return mention{}, false
 	}

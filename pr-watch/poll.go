@@ -191,29 +191,7 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 		}
 	}
 	w.snap, w.reviewed = snap, reviewed
-	w.toReview = nil
-	for _, n := range d.Review.Nodes {
-		// a PR you already reviewed and are asked to look at again shows under Reviewed, not twice
-		if n.Number != 0 && !slices.ContainsFunc(w.reviewed, func(r ReviewedPR) bool { return r.Number == n.Number }) {
-			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
-				Additions: n.Additions, Deletions: n.Deletions}
-			r.ApprovedBy, r.Security = otherReviews(n, w.me, w.cfg.SecurityTeam)
-			r.CI = "NONE"
-			if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
-				r.CI = n.Commits.Nodes[0].Commit.StatusCheckRollup.State
-			}
-			if n.MergeQueueEntry != nil {
-				r.QueuePosition = max(1, n.MergeQueueEntry.Position)
-			}
-			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)
-			if n.Author != nil {
-				r.Author = n.Author.Login
-			}
-			w.toReview = append(w.toReview, r)
-		}
-	}
-	// someone else already approved these: your review matters less, so they go last
-	slices.SortStableFunc(w.toReview, func(a, b ReviewRequest) int { return min(len(a.ApprovedBy), 1) - min(len(b.ApprovedBy), 1) })
+	w.toReview = reviewRequests(d.Review.Nodes, w.reviewed, w.me, w.cfg.SecurityTeam)
 	w.store.write("refs", w.pushedRefs())
 	w.store.remove("retry")
 	w.refreshed = now
@@ -271,4 +249,32 @@ func prNumber(s string) (int, error) {
 		s = s[1:]
 	}
 	return strconv.Atoi(s)
+}
+
+// reviewRequests are the PRs waiting for your review, minus those you reviewed already (they show under Reviewed).
+func reviewRequests(nodes []reviewNode, reviewed []ReviewedPR, me, team string) []ReviewRequest {
+	var out []ReviewRequest
+	for _, n := range nodes {
+		// a PR you already reviewed and are asked to look at again shows under Reviewed, not twice
+		if n.Number != 0 && !slices.ContainsFunc(reviewed, func(r ReviewedPR) bool { return r.Number == n.Number }) {
+			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
+				Additions: n.Additions, Deletions: n.Deletions}
+			r.ApprovedBy, r.Security = otherReviews(n, me, team)
+			r.CI = "NONE"
+			if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
+				r.CI = n.Commits.Nodes[0].Commit.StatusCheckRollup.State
+			}
+			if n.MergeQueueEntry != nil {
+				r.QueuePosition = max(1, n.MergeQueueEntry.Position)
+			}
+			r.Created, _ = time.Parse(time.RFC3339, n.CreatedAt)
+			if n.Author != nil {
+				r.Author = n.Author.Login
+			}
+			out = append(out, r)
+		}
+	}
+	// someone else already approved these: your review matters less, so they go last
+	slices.SortStableFunc(out, func(a, b ReviewRequest) int { return min(len(a.ApprovedBy), 1) - min(len(b.ApprovedBy), 1) })
+	return out
 }

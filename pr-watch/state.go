@@ -143,6 +143,18 @@ func (s Store) Snapshot() (snap map[string]Stored, ok bool) {
 
 func (s Store) SaveSnapshot(snap map[string]Stored) error { return s.writeJSON("snapshot.json", snap) }
 
+// TabsPlaced is the stage each session was last put in, by session ID (tabs.json).
+func (s Store) TabsPlaced() map[string]string {
+	placed := map[string]string{}
+	b, _ := os.ReadFile(s.path("tabs.json"))
+	json.Unmarshal(b, &placed)
+	return placed
+}
+
+func (s Store) SaveTabsPlaced(placed map[string]string) error {
+	return s.writeJSON("tabs.json", placed)
+}
+
 // ReviewedSnapshot is the last refresh of the PRs you reviewed. ok is false when there is none yet.
 func (s Store) ReviewedSnapshot() (snap map[string]ReviewedStored, ok bool) {
 	b, err := os.ReadFile(s.path("reviewed.json"))

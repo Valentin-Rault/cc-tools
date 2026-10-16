@@ -66,20 +66,9 @@ func resolve(sessions []Session, o Owner) (Session, bool) {
 
 // jumpTo focuses the zellij pane a Claude process runs in, read from that process's environment.
 func jumpTo(pid int) error {
-	out, err := exec.Command("ps", "eww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	zsession, pane, err := paneOf(pid)
 	if err != nil {
-		return fmt.Errorf("ps: %w", err)
-	}
-	var zsession, pane string
-	for _, f := range strings.Fields(string(out)) {
-		if v, ok := strings.CutPrefix(f, "ZELLIJ_SESSION_NAME="); ok {
-			zsession = v
-		} else if v, ok := strings.CutPrefix(f, "ZELLIJ_PANE_ID="); ok {
-			pane = v
-		}
-	}
-	if zsession == "" || pane == "" {
-		return errors.New("that session isn't running inside zellij")
+		return err
 	}
 	var panes []struct {
 		ID          int  `json:"id"`
@@ -124,4 +113,23 @@ func zellij(session string, args ...string) (string, error) {
 		return "", fmt.Errorf("zellij %s: %s", args[0], cmp.Or(strings.TrimSpace(stderr.String()), err.Error()))
 	}
 	return string(out), nil
+}
+
+// paneOf is the zellij session and pane a Claude process runs in, from its environment.
+func paneOf(pid int) (zsession, pane string, err error) {
+	out, err := exec.Command("ps", "eww", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return "", "", fmt.Errorf("ps: %w", err)
+	}
+	for _, f := range strings.Fields(string(out)) {
+		if v, ok := strings.CutPrefix(f, "ZELLIJ_SESSION_NAME="); ok {
+			zsession = v
+		} else if v, ok := strings.CutPrefix(f, "ZELLIJ_PANE_ID="); ok {
+			pane = v
+		}
+	}
+	if zsession == "" || pane == "" {
+		return "", "", errors.New("that session isn't running inside zellij")
+	}
+	return zsession, pane, nil
 }

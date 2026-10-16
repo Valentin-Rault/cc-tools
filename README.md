@@ -8,7 +8,8 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 | [`cc-status`](#cc-status) | Shows which Claude sessions in your zellij panes need you, and jumps to them. |
 | [`hooks/pr-guard.sh`](#pr-guard) | A Claude Code hook that keeps merging your call: Claude can't merge, enqueue or enable auto-merge. |
 
-macOS, zellij 0.45+, Claude Code, `gh` (logged in), `git`, `jq`. Go 1.24+ to build pr-watch; cc-status needs only Python 3.
+macOS, zellij 0.45+, Claude Code, `gh` (logged in), `git`, `jq`. Go 1.24+ to build pr-watch, and Rust with the
+`wasm32-wasip1` target for its zellij plugin; cc-status needs only Python 3.
 
 ```sh
 make install   # builds pr-watch into ~/.claude/pr-watch/ and links it and cc-status into ~/.local/bin, pr-guard into ~/.claude/hooks
@@ -115,6 +116,26 @@ override it):
 `ignore` lists logins whose reviews and comments never need action. `security_team` is the slug of a team whose
 review some PRs need (optional). State lives in `~/.pr-watch/`
 (`PR_WATCH_DIR`); `events.log` there is the history of everything detected and sent.
+
+### Tabs by stage
+
+With `"arrange_tabs": true` in the config, pr-watch keeps each Claude session that works in the repo in the zellij
+tab of its stage, creating the tabs as needed:
+
+| tab | sessions |
+|---|---|
+| WIP | no PR yet, or only drafts |
+| In review | a PR out of draft (a stack as soon as one of its PRs is) |
+| Reviewing | reviewing someone else's PR |
+| Done | all its PRs merged or closed, ready to clean up |
+
+A session moves when its stage changes, never while you're in its pane, and a pane you move by hand stays until
+its stage changes again. Sessions working outside the repo are left alone. `pr-watch tabs` prints what would move
+where without moving anything.
+
+zellij's command line can't move a pane to another tab, so a small plugin does (`zellij-tabs/`, Rust built for
+`wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
+`zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`.
 
 ## cc-status
 

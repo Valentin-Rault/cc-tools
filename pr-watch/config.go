@@ -17,6 +17,10 @@ type Config struct {
 	Ignore  []string `json:"ignore"`   // logins whose reviews and comments never need action (bots)
 	// SecurityTeam is the slug of a team whose review some PRs need; they get a shield in To review.
 	SecurityTeam string `json:"security_team"`
+	// ArrangeTabs moves each Claude session working in the repo to the zellij tab of its stage (WIP, In review,
+	// Reviewing, Done), through the plugin at TabsPlugin.
+	ArrangeTabs bool   `json:"arrange_tabs"`
+	TabsPlugin  string `json:"tabs_plugin"`
 }
 
 func configPath() string {
@@ -27,7 +31,8 @@ func configPath() string {
 }
 
 func loadConfig() (Config, error) {
-	c := Config{Ignore: []string{"github-actions", "dependabot"}}
+	c := Config{Ignore: []string{"github-actions", "dependabot"},
+		TabsPlugin: filepath.Join(home(), ".config/zellij/plugins/pr-watch-tabs.wasm")}
 	path := configPath()
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {

@@ -12,7 +12,8 @@ import (
 
 const usage = `pr-watch                          open the TUI: watch your open PRs, send each event to the PR's owner session
 pr-watch claim <session> <pr>...  route those PRs' events to that Claude session
-pr-watch send <session> [text]    test delivery: send text (or a sample event) to a session, print the outcome`
+pr-watch send <session> [text]    test delivery: send text (or a sample event) to a session, print the outcome
+pr-watch tabs                     show which zellij tab each Claude session would move to, without moving any`
 
 func main() {
 	store := Store{Dir: stateDir()}
@@ -41,6 +42,10 @@ func main() {
 			}
 		}
 		if err := store.Claim(owner, prs); err != nil {
+			fail(err)
+		}
+	case args[0] == "tabs" && len(args) == 1:
+		if err := printTabsPlan(store); err != nil {
 			fail(err)
 		}
 	case args[0] == "send" && len(args) >= 2:

@@ -1,3 +1,4 @@
 /bin/
 .private-words
 /zellij-tabs/target/
+/pr-watch/pr-watch

@@ -100,8 +100,8 @@ just came in. GitHub doesn't notify you about your own actions, so pr-watch also
 every minute for 10 minutes after you open a PR from it (`⏎`), when you're likely about to review, merge or comment.
 Merge conflicts, usually from someone else's merge, come with no notification either: a refresh finds them, and
 while GitHub is still working out whether a PR conflicts, pr-watch asks again every poll.
-A refresh costs about 13 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list and as one macOS
-notification each.
+A refresh costs about 13 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list, and with
+`"notify": true` in the config also as one macOS notification each.
 
 **Config** in `~/.config/pr-watch/config.json` (`PR_WATCH_REPO`, `PR_WATCH_REPO_DIR` and `PR_WATCH_IGNORE`
 override it):

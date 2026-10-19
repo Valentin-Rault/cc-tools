@@ -211,6 +211,17 @@ func TestReviewRequestNotifiesOnce(t *testing.T) {
 	}
 }
 
+func TestDesktopNotificationsAreOptIn(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.write("me", "me")
+	for _, on := range []bool{false, true} {
+		w, err := newWatcher(Config{Repo: "acme/widgets", Notify: on}, store, &fakeGitHub{})
+		if err != nil || (w.notify != nil) != on {
+			t.Errorf("with notify %v: notifies %v, err %v", on, err == nil && w.notify != nil, err)
+		}
+	}
+}
+
 // A PR that leaves your open PRs (merged or closed) loses its owner on the next refresh.
 func TestClosedPRsLoseTheirOwner(t *testing.T) {
 	store := Store{Dir: t.TempDir()}

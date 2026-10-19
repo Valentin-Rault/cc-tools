@@ -61,7 +61,10 @@ type PollResult struct {
 }
 
 func newWatcher(cfg Config, store Store, gh GitHub) (*Watcher, error) {
-	w := &Watcher{cfg: cfg, store: store, gh: gh, interval: time.Minute, notify: desktopNotify}
+	w := &Watcher{cfg: cfg, store: store, gh: gh, interval: time.Minute}
+	if cfg.Notify {
+		w.notify = desktopNotify
+	}
 	w.snap, _ = store.Snapshot()
 	w.since = store.read("since")
 	if w.since == "" {
@@ -118,8 +121,8 @@ func (w *Watcher) Poll(force bool) PollResult {
 	return r
 }
 
-// readNotifications reports whether one concerns your PRs. Review requests and mentions on other PRs get a
-// desktop notification, once per PR and reason, so a re-request after the first stays silent.
+// readNotifications reports whether one concerns your PRs. Review requests and mentions on other PRs are logged, and
+// get a desktop notification with Notify on, once per PR and reason, so a re-request after the first stays silent.
 func (w *Watcher) readNotifications(items []notification, stamp string) (need bool) {
 	for _, it := range items {
 		if it.UpdatedAt <= w.since {
@@ -140,7 +143,9 @@ func (w *Watcher) readNotifications(items []notification, stamp string) (need bo
 		}
 		w.store.appendLine("notified", key)
 		w.store.appendLine("events.log", fmt.Sprintf("%s #%s %s %s", stamp, pr, it.Reason, it.Subject.Title))
-		w.notify("PR #"+pr+" "+it.Reason, it.Subject.Title)
+		if w.notify != nil {
+			w.notify("PR #"+pr+" "+it.Reason, it.Subject.Title)
+		}
 	}
 	return need
 }

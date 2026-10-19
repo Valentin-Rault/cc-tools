@@ -21,6 +21,9 @@ type Config struct {
 	// Reviewing, Done), through the plugin at TabsPlugin.
 	ArrangeTabs bool   `json:"arrange_tabs"`
 	TabsPlugin  string `json:"tabs_plugin"`
+	// Notify shows a macOS notification for each review request or mention on someone else's PR. Off by default:
+	// the To review list shows them anyway.
+	Notify bool `json:"notify"`
 }
 
 func configPath() string {

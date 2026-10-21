@@ -166,7 +166,7 @@ bind "Super Shift a" { Run "cc-status" "ui" { floating true; close_on_exit true;
 ```
 
 `CC_STATUS_BADGES=0` stops it appending ●✓◐ to tab names; `CC_STATUS_TINT` and `CC_STATUS_GLOW` style the
-focus glow.
+focus glow. pr-watch's `g` plays the same cue when it jumps to a PR's owner.
 
 ## pr-guard
 

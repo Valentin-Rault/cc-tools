@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Session is a running Claude Code session, as `claude agents --json` lists it. Its name is what SendMessage takes.
@@ -64,7 +65,8 @@ func resolve(sessions []Session, o Owner) (Session, bool) {
 	return Session{}, false
 }
 
-// jumpTo focuses the zellij pane a Claude process runs in, read from that process's environment.
+// jumpTo focuses the zellij pane a Claude process runs in, read from that process's environment, with the focus cue
+// cc-status plays on its own jumps.
 func jumpTo(pid int) error {
 	zsession, pane, err := paneOf(pid)
 	if err != nil {
@@ -90,18 +92,34 @@ func jumpTo(pid int) error {
 		target := "terminal_" + pane
 		here := os.Getenv("ZELLIJ_SESSION_NAME")
 		if zsession != here {
-			_, err := zellij(here, "switch-session", zsession, "--tab-position", strconv.Itoa(p.TabPosition), "--pane-id", target)
-			return err
+			if _, err := zellij(here, "switch-session", zsession, "--tab-position", strconv.Itoa(p.TabPosition), "--pane-id", target); err != nil {
+				return err
+			}
+		} else {
+			if _, err := zellij(here, "go-to-tab-by-id", strconv.Itoa(p.TabID)); err != nil {
+				return err
+			}
+			if _, err := zellij(here, "focus-pane-id", target); err != nil && !strings.Contains(err.Error(), "already focused") {
+				return err
+			}
 		}
-		if _, err := zellij(here, "go-to-tab-by-id", strconv.Itoa(p.TabID)); err != nil {
-			return err
-		}
-		if _, err := zellij(here, "focus-pane-id", target); err != nil && !strings.Contains(err.Error(), "already focused") {
-			return err
-		}
+		playCue(zsession, pane)
 		return nil
 	}
 	return fmt.Errorf("pane %s not found in zellij session %s", pane, zsession)
+}
+
+// playCue has cc-status glow the pane just jumped to and animate its title. Without cc-status the jump is just quiet.
+func playCue(zsession, pane string) {
+	bin, err := exec.LookPath("cc-status")
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(bin, "cue", zsession, pane)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // finishes even when pr-watch quits right after the jump
+	if cmd.Start() == nil {
+		go cmd.Wait()
+	}
 }
 
 func zellij(session string, args ...string) (string, error) {

@@ -132,7 +132,8 @@ tab of its stage, creating the tabs as needed:
 | Done | all its PRs merged or closed, ready to clean up |
 
 A session moves when its stage changes, never while you're in its pane, and a pane you move by hand stays until
-its stage changes again. A session started from the `o` picker opens in the tab of its stage. Sessions working
+its stage changes again. A session with no PR yet, or only drafts, stays in the tab you started it in;
+only one coming back from In review, its PR in draft again, moves to WIP. A session started from the `o` picker opens in the tab of its stage. Sessions working
 outside the repo are left alone. `pr-watch tabs` prints what would move where without moving anything.
 
 zellij's command line can't move a pane to another tab, so a small plugin does (`zellij-tabs/`, Rust built for

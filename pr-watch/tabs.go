@@ -203,8 +203,9 @@ type tabMove struct {
 const maxTries = 3
 
 // plan decides what to do with each session. placed is the stage each session was last seen placed in: a session
-// moves only when its stage changes, so a pane you moved by hand stays there until then. tries counts the rounds a
-// move was asked for and hasn't happened.
+// moves only when its stage changes, so a pane you moved by hand stays there until then. A WIP session moves only back
+// from In review, its PR in draft again: you can start one in any tab. tries counts the rounds a move was asked for
+// and hasn't happened.
 func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[string]string, tries map[string]int) []tabMove {
 	var moves []tabMove
 	for _, s := range sessions {
@@ -218,6 +219,8 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 			m.Act, m.Why = "skip", "not in a zellij pane"
 		case tabBase(spot.tab) == st:
 			m.Act, m.Why = "there", "in its tab"
+		case st == stageWIP && placed[s.SessionID] != stageReview:
+			m.Act, m.Why = "skip", "WIP stays in the tab you started it in"
 		case placed[s.SessionID] == st:
 			m.Act, m.Why = "stay", "placed before; moves again when its stage changes"
 		case spot.focused:

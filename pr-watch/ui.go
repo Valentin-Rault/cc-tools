@@ -554,7 +554,7 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 	m.owners, m.inflight[pr] = m.store.Owners(), true
 	m.savePending()
 	prompt, title, repoDir := handover(pr, info, batch), fmt.Sprintf("PR #%d", pr), m.cfg.RepoDir
-	if m.cfg.ArrangeTabs { // straight into the tab of its stage, the one pr-watch would move it to
+	if m.cfg.ArrangeTabs { // straight into the tab of its stage
 		switch {
 		case info.Reviewing:
 			title = stageReviewing

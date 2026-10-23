@@ -49,17 +49,19 @@ func TestPlan(t *testing.T) {
 	in := func(id string) Session {
 		return Session{SessionID: id, Name: id, Cwd: "/code/widgets", Branch: "feat/b"}
 	}
-	sessions := []Session{in("move"), in("there"), in("placed"), in("focused"), in("stuck"), in("nozellij"), {SessionID: "out", Cwd: "/tmp"}}
+	sessions := []Session{in("move"), in("there"), in("placed"), in("focused"), in("stuck"), in("nozellij"), {SessionID: "out", Cwd: "/tmp"},
+		{SessionID: "wip", Cwd: "/code/widgets", Branch: "feat/new"}, {SessionID: "redraft", Cwd: "/code/widgets", Branch: "feat/new"}}
 	spots := map[string]paneSpot{
 		"move": {pane: "1", tab: "Tab #2"}, "there": {pane: "2", tab: stageReview + " ✓"}, // cc-status's badge doesn't count
 		"placed": {pane: "3", tab: "somewhere you put it"}, "focused": {pane: "4", tab: "Tab #2", focused: true},
-		"stuck": {pane: "5", tab: "Tab #2"}, "out": {pane: "6", tab: "Tab #1"},
+		"stuck": {pane: "5", tab: "Tab #2"}, "out": {pane: "6", tab: "Tab #1"}, "wip": {pane: "7", tab: "Tab #2"},
+		"redraft": {pane: "8", tab: stageReview},
 	}
 	var acts []string
-	for _, m := range v.plan(sessions, spots, map[string]string{"placed": stageReview}, map[string]int{"stuck": maxTries}) {
+	for _, m := range v.plan(sessions, spots, map[string]string{"placed": stageReview, "redraft": stageReview}, map[string]int{"stuck": maxTries}) {
 		acts = append(acts, m.Session.SessionID+":"+m.Act)
 	}
-	want := []string{"move:move", "there:there", "placed:stay", "focused:wait", "stuck:stuck", "nozellij:skip", "out:skip"}
+	want := []string{"move:move", "there:there", "placed:stay", "focused:wait", "stuck:stuck", "nozellij:skip", "out:skip", "wip:skip", "redraft:move"}
 	if !slices.Equal(acts, want) {
 		t.Errorf("plan = %q, want %q", acts, want)
 	}

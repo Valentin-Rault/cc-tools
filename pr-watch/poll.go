@@ -162,13 +162,15 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 		events = diff(w.snap, prs, now)
 	}
 	snap := snapshot(w.snap, prs)
-	if err := w.store.SaveSnapshot(snap); err != nil {
-		return nil, nil, fmt.Errorf("saving the snapshot: %w", err)
-	}
 	reviewed := reviewedPRs(d.Reviewed.Nodes, w.me, w.cfg.Ignore)
 	oldReviewed, ok := w.store.ReviewedSnapshot()
 	if ok {
 		events = append(events, diffReviewed(oldReviewed, reviewed, now)...)
+	}
+	newReviewed := reviewedSnapshot(reviewed)
+	closed, reviewed = w.settleGone(snap, oldReviewed, newReviewed, reviewed)
+	if err := w.store.SaveSnapshot(snap); err != nil {
+		return nil, nil, fmt.Errorf("saving the snapshot: %w", err)
 	}
 	if own := w.store.lines("dequeued"); len(own) > 0 { // you took these out of the queue yourself: no event for it
 		events = slices.DeleteFunc(events, func(e Event) bool {
@@ -182,18 +184,8 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 		}
 		w.store.write("dequeued", strings.Join(still, "\n"))
 	}
-	newReviewed := reviewedSnapshot(reviewed)
 	if err := w.store.SaveReviewedSnapshot(newReviewed); err != nil {
 		return nil, nil, fmt.Errorf("saving the reviewed snapshot: %w", err)
-	}
-	for _, pair := range []struct {
-		old, now map[string]bool
-	}{{keys(w.snap), keys(snap)}, {keys(oldReviewed), keys(newReviewed)}} {
-		for pr := range pair.old {
-			if n, err := strconv.Atoi(pr); err == nil && !pair.now[pr] {
-				closed = append(closed, n)
-			}
-		}
 	}
 	w.snap, w.reviewed = snap, reviewed
 	w.toReview = reviewRequests(d.Review.Nodes, w.reviewed, w.me, w.cfg.SecurityTeam)
@@ -206,6 +198,45 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed []int, err erro
 		w.store.appendLine("events.log", fmt.Sprintf("%s #%d owner=%s %s", stamp, e.PR, cmp.Or(owners[e.PR].Name, "?"), e.Text))
 	}
 	return events, closed, nil
+}
+
+// settleGone sorts out the PRs that left the search since the last refresh, and returns the closed ones. GitHub's
+// search answers with what it found in time, without an error, so a PR missing from it may still be open: it counts
+// as closed once GitHub says it's merged or closed. Until then it keeps its place in snap and newReviewed, with the
+// feedback already seen, so it keeps its owner and nothing is sent again when the search has it back.
+func (w *Watcher) settleGone(snap map[string]Stored, oldReviewed, newReviewed map[string]ReviewedStored, reviewed []ReviewedPR) ([]int, []ReviewedPR) {
+	var gone, closed []int
+	for _, pair := range []struct {
+		old, now map[string]bool
+	}{{keys(w.snap), keys(snap)}, {keys(oldReviewed), keys(newReviewed)}} {
+		for pr := range pair.old {
+			if n, err := strconv.Atoi(pr); err == nil && !pair.now[pr] {
+				gone = append(gone, n)
+			}
+		}
+	}
+	if len(gone) == 0 {
+		return nil, reviewed
+	}
+	slices.Sort(gone)
+	states, err := w.gh.States(w.cfg.Repo, gone) // on an error they all stay, and the next refresh asks again
+	for _, n := range gone {
+		if err == nil && (states[n] == "MERGED" || states[n] == "CLOSED") {
+			closed = append(closed, n)
+			continue
+		}
+		pr := strconv.Itoa(n)
+		if s, ok := w.snap[pr]; ok {
+			snap[pr] = s
+		}
+		if s, ok := oldReviewed[pr]; ok {
+			newReviewed[pr] = s
+			if i := slices.IndexFunc(w.reviewed, func(r ReviewedPR) bool { return r.Number == n }); i >= 0 {
+				reviewed = append(reviewed, w.reviewed[i])
+			}
+		}
+	}
+	return closed, reviewed
 }
 
 func keys[V any](m map[string]V) map[string]bool {

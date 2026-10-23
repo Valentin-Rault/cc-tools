@@ -13,11 +13,15 @@ import (
 
 // fakeGitHub answers with canned state, like the fake gh the bash test.sh put on PATH.
 type fakeGitHub struct {
-	search   *searchData
-	notifs   *notifications
-	queueErr error
-	queued   []string // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
+	search    *searchData
+	notifs    *notifications
+	states    map[int]string // what States answers; a PR missing from it gets no answer
+	statesErr error
+	queueErr  error
+	queued    []string // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
 }
+
+func (f *fakeGitHub) States(string, []int) (map[int]string, error) { return f.states, f.statesErr }
 
 func (f *fakeGitHub) Enqueue(prID, head string) error {
 	f.queued = append(f.queued, "enqueue "+prID+" "+head)
@@ -227,13 +231,42 @@ func TestClosedPRsLoseTheirOwner(t *testing.T) {
 	store := Store{Dir: t.TempDir()}
 	store.SaveSnapshot(map[string]Stored{"1": {Seen: []string{"R0", "R1", "R2", "C3", "C4"}}, "5": {}})
 	store.Claim(Owner{Name: "feat-a"}, []int{1, 5})
-	w, _, _ := newTestWatcher(t, store)
+	w, gh, _ := newTestWatcher(t, store)
+	gh.states = map[int]string{5: "MERGED"}
 	r := w.Poll(true)
 	if len(r.Closed) != 1 || r.Closed[0] != 5 {
 		t.Errorf("closed = %v", r.Closed)
 	}
 	if o := store.Owners(); len(o) != 1 || o[1].Name != "feat-a" {
 		t.Errorf("owners = %v", o)
+	}
+}
+
+// GitHub's search can answer without your PRs, and no error. They stay until GitHub says they're closed: they keep
+// their owners, and their feedback isn't sent again when the search has them back.
+func TestPRsMissingFromTheSearchStay(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.SaveReviewedSnapshot(map[string]ReviewedStored{"8": {Head: "h8"}})
+	store.Claim(Owner{Name: "feat-a"}, []int{1})
+	store.Claim(Owner{Name: "rev"}, []int{8})
+	w, gh, _ := newTestWatcher(t, store)
+	w.Poll(true)
+	full := gh.search
+	gh.search = &searchData{Review: full.Review}
+	gh.states = map[int]string{1: "OPEN"} // no answer for 2 and 8
+	if r := w.Poll(true); len(r.Closed) != 0 || len(r.PRs) != 2 || len(r.Reviewed) != 1 {
+		t.Errorf("closed %v, PRs %v, reviewed %v", r.Closed, keys(r.PRs), r.Reviewed)
+	}
+	gh.statesErr = errors.New("offline")
+	if r := w.Poll(true); len(r.Closed) != 0 || len(r.PRs) != 2 {
+		t.Errorf("with the state unknown: closed %v, PRs %v", r.Closed, keys(r.PRs))
+	}
+	if o := store.Owners(); len(o) != 2 {
+		t.Errorf("owners = %v", o)
+	}
+	gh.search = full
+	if r := w.Poll(true); len(r.Events) != 0 {
+		t.Errorf("sent again: %q", eventLines(r.Events))
 	}
 }
 
@@ -272,6 +305,7 @@ func TestReviewedPRsInThePoll(t *testing.T) {
 	store.Claim(Owner{Name: "rev-session"}, []int{8, 99})
 	w, gh, _ := newTestWatcher(t, store)
 	gh.search.Reviewed.Nodes[0].Commits.Nodes = []struct{ Commit struct{ Oid string } }{{struct{ Oid string }{"h7"}}, {struct{ Oid string }{"h8"}}}
+	gh.states = map[int]string{99: "CLOSED"}
 	r := w.Poll(true)
 	if !slices.Equal(r.Closed, []int{99}) {
 		t.Errorf("closed = %v", r.Closed)

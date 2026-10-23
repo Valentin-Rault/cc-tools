@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -16,8 +17,9 @@ type GitHub interface {
 	Login() (string, error)
 	Search(repo, me string) (*searchData, error)
 	Notifications(repo, lastModified string) (*notifications, error)
-	Enqueue(prID, head string) error // add a PR to its merge queue, if its head is still head
-	Dequeue(prID string) error       // take it out again
+	States(repo string, prs []int) (map[int]string, error) // OPEN, CLOSED or MERGED, by PR number
+	Enqueue(prID, head string) error                       // add a PR to its merge queue, if its head is still head
+	Dequeue(prID string) error                             // take it out again
 }
 
 const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
@@ -194,6 +196,29 @@ func (c *ghClient) Search(repo, me string) (*searchData, error) {
 		"me":       me,
 	}, &d)
 	return &d, err
+}
+
+func (c *ghClient) States(repo string, prs []int) (map[int]string, error) {
+	owner, name, _ := strings.Cut(repo, "/")
+	var q strings.Builder
+	q.WriteString(`query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {`)
+	for _, n := range prs {
+		fmt.Fprintf(&q, " pr%d: pullRequest(number: %d) { state }", n, n)
+	}
+	q.WriteString(" } }")
+	var d struct {
+		Repository map[string]*struct{ State string }
+	}
+	if err := c.gql.Do(q.String(), map[string]any{"owner": owner, "name": name}, &d); err != nil {
+		return nil, err
+	}
+	states := map[int]string{}
+	for _, n := range prs {
+		if pr := d.Repository["pr"+strconv.Itoa(n)]; pr != nil {
+			states[n] = pr.State
+		}
+	}
+	return states, nil
 }
 
 // Enqueue adds the PR to its merge queue. head is the commit you saw: GitHub refuses if the PR moved on since.

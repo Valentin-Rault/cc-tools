@@ -61,7 +61,7 @@ func worktreeFor(repoDir, branch string, pr int) (string, error) {
 }
 
 // openTab starts an interactive Claude session in the tab named title of the zellij session pr-watch runs in, or in a
-// new tab of that name.
+// new tab of that name. Its pane is titled like any other Claude pane, with what the session works on.
 func openTab(title, dir string, claudeArgs ...string) error {
 	here := os.Getenv("ZELLIJ_SESSION_NAME")
 	if here == "" {
@@ -71,9 +71,13 @@ func openTab(title, dir string, claudeArgs ...string) error {
 	if err != nil {
 		return err
 	}
+	// the topic Claude finds for the session, not its -n name
+	claudeArgs = append([]string{"--settings", `{"terminalTitleFromRename":false}`}, claudeArgs...)
 	if id, ok := tabIDs(here)[title]; ok { // a tab of that name already: open the session there and show it
 		tab := strconv.Itoa(id)
-		pane, err := zellij(here, append([]string{"new-pane", "--tab-id", tab, "--cwd", dir, "--", bin}, claudeArgs...)...)
+		// zellij names a pane it starts with a command after the command, which hides the title Claude sets: an
+		// empty name keeps it out (a new tab's pane isn't named)
+		pane, err := zellij(here, append([]string{"new-pane", "--tab-id", tab, "--name", "", "--cwd", dir, "--", bin}, claudeArgs...)...)
 		if err != nil {
 			return err
 		}

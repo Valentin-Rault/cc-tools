@@ -40,7 +40,8 @@ type tabView struct {
 	owners   map[int]Owner
 	links    map[int]prLink
 	mentions map[int][]mention
-	repoDirs []string // the clone and its worktrees: sessions working elsewhere are left alone
+	closed   map[int]bool // PRs pr-watch saw merged or closed
+	repoDirs []string     // the clone and its worktrees: sessions working elsewhere are left alone
 }
 
 // stage is the tab a session belongs in, or "" when it doesn't work in the repo.
@@ -98,26 +99,16 @@ func (v tabView) reviewing(s Session) bool {
 	return false
 }
 
-// finished: the session worked on or reviewed PRs, and none of them is open anymore.
+// finished: the session worked on or reviewed a PR that pr-watch saw merged or closed. Not being among your open
+// PRs isn't enough: a PR opened a minute ago isn't there yet, nor is someone else's that the session only looked up.
 func (v tabView) finished(s Session) bool {
-	open := map[int]bool{}
-	for num := range v.prs {
-		n, _ := strconv.Atoi(num)
-		open[n] = true
-	}
-	for _, r := range v.reviewed {
-		open[r.Number] = true
-	}
-	for _, r := range v.toReview {
-		open[r.Number] = true
-	}
 	for pr, l := range v.links {
-		if l.SessionID == s.SessionID && !open[pr] {
+		if l.SessionID == s.SessionID && v.closed[pr] {
 			return true
 		}
 	}
 	for pr := range v.mentions {
-		if r, ok := clearReviewer(v.mentions, pr); ok && r.SessionID == s.SessionID && !open[pr] {
+		if r, ok := clearReviewer(v.mentions, pr); ok && r.SessionID == s.SessionID && v.closed[pr] {
 			return true
 		}
 	}
@@ -372,7 +363,7 @@ func printTabsPlan(store Store) error {
 	links, mentions := newLinkIndex(cfg.Repo).update()
 	v := tabView{prs: snapshot(nil, normalize(d.Mine.Nodes, me, cfg.Ignore)), reviewed: reviewed,
 		toReview: reviewRequests(d.Review.Nodes, reviewed, me, cfg.SecurityTeam), owners: store.Owners(),
-		links: links, mentions: mentions, repoDirs: repoDirs(cfg.RepoDir)}
+		links: links, mentions: mentions, closed: store.Closed(), repoDirs: repoDirs(cfg.RepoDir)}
 	sessions, err := liveSessions()
 	if err != nil {
 		return err

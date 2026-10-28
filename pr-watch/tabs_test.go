@@ -19,8 +19,9 @@ func TestStage(t *testing.T) {
 		reviewed: []ReviewedPR{{Number: 30}},
 		toReview: []ReviewRequest{{Number: 31}},
 		owners:   map[int]Owner{12: {Name: "stack", SessionID: "s-stack"}, 31: {Name: "rev2", SessionID: "s-rev2"}},
-		links:    map[int]prLink{11: {SessionID: "s-stack"}, 99: {SessionID: "s-done"}},
-		mentions: map[int][]mention{30: {{SessionID: "s-rev", Count: 9}}, 98: {{SessionID: "s-revdone", Count: 7}}},
+		links:    map[int]prLink{11: {SessionID: "s-stack"}, 99: {SessionID: "s-done"}, 100: {SessionID: "s-opened"}},
+		mentions: map[int][]mention{30: {{SessionID: "s-rev", Count: 9}}, 98: {{SessionID: "s-revdone", Count: 7}}, 97: {{SessionID: "s-lookup", Count: 5}}},
+		closed:   map[int]bool{99: true, 98: true},
 		repoDirs: []string{"/code/widgets", "/code/widgets-a"},
 	}
 	cases := []struct {
@@ -33,6 +34,8 @@ func TestStage(t *testing.T) {
 		{Session{SessionID: "s-rev2", Name: "rev2", Cwd: "/code/widgets/sub"}, stageReviewing}, // confirmed reviewer of #31
 		{Session{SessionID: "s-done", Cwd: "/code/widgets"}, stageDone},                        // its PR #99 is closed
 		{Session{SessionID: "s-revdone", Cwd: "/code/widgets"}, stageDone},                     // the PR it reviewed is closed
+		{Session{SessionID: "s-opened", Cwd: "/code/widgets"}, stageWIP},                       // #100 is too new for the snapshot
+		{Session{SessionID: "s-lookup", Cwd: "/code/widgets"}, stageWIP},                       // only looked up #97, never yours to review
 		{Session{SessionID: "s-new", Cwd: "/code/widgets", Branch: "feat/new"}, stageWIP},      // no PR yet
 		{Session{SessionID: "s-out", Cwd: "/code/other", Branch: "feat/a"}, ""},                // not in the repo
 		{Session{SessionID: "s-near", Cwd: "/code/widgets-ab"}, ""},                            // a sibling folder isn't the repo

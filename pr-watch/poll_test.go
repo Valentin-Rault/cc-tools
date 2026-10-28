@@ -240,6 +240,9 @@ func TestClosedPRsLoseTheirOwner(t *testing.T) {
 	if o := store.Owners(); len(o) != 1 || o[1].Name != "feat-a" {
 		t.Errorf("owners = %v", o)
 	}
+	if c := store.Closed(); len(c) != 1 || !c[5] {
+		t.Errorf("closed = %v", c)
+	}
 }
 
 // GitHub's search can answer without your PRs, and no error. They stay until GitHub says they're closed: they keep

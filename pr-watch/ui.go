@@ -177,7 +177,7 @@ func (m *model) arrangeTabs() tea.Cmd {
 	}
 	sessions, store, cfg, tries := m.sessions, m.store, m.cfg, m.tabTries // only this goroutine touches tries till it's done
 	return func() tea.Msg {
-		v.repoDirs = repoDirs(cfg.RepoDir)
+		v.repoDirs, v.closed = repoDirs(cfg.RepoDir), store.Closed()
 		asked, arrived, err := arrange(store, cfg.TabsPlugin, v.plan(sessions, locate(sessions), store.TabsPlaced(), tries), tries)
 		return tabsMsg{asked, arrived, err}
 	}

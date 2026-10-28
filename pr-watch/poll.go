@@ -112,8 +112,8 @@ func (w *Watcher) Poll(force bool) PollResult {
 	if need {
 		events, closed, err := w.refresh(now)
 		r.Events, r.Closed, r.Refreshed = events, closed, err == nil
-		if len(r.Closed) > 0 { // their owners have nothing left to receive
-			errs = append(errs, w.store.Unclaim(r.Closed))
+		if len(r.Closed) > 0 { // their owners have nothing left to receive, and their sessions are done
+			errs = append(errs, w.store.Unclaim(r.Closed), w.store.AddClosed(r.Closed))
 		}
 		errs = append(errs, err)
 	}

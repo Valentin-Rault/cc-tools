@@ -123,6 +123,25 @@ func (s Store) editOwners(edit func(map[int]Owner)) error {
 	return s.write("owners", b.String())
 }
 
+// Closed is every PR pr-watch saw leave your open or reviewed PRs merged or closed (closed, one per line).
+func (s Store) Closed() map[int]bool {
+	closed := map[int]bool{}
+	for _, l := range s.lines("closed") {
+		if n, err := strconv.Atoi(l); err == nil {
+			closed[n] = true
+		}
+	}
+	return closed
+}
+
+func (s Store) AddClosed(prs []int) error {
+	var errs []error
+	for _, pr := range prs {
+		errs = append(errs, s.appendLine("closed", strconv.Itoa(pr)))
+	}
+	return errors.Join(errs...)
+}
+
 func (s Store) Hot() error {
 	return s.write("hot-until", strconv.FormatInt(time.Now().Add(hotFor).Unix(), 10))
 }

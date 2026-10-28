@@ -42,37 +42,44 @@ func (m *model) View() tea.View {
 	}
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
+	v.ReportFocus = true // to tell what's new since you left the pane
 	v.WindowTitle = m.windowTitle()
 	return v
 }
 
 func (m *model) body(w, h int) []string {
 	var rows []string
+	var nums []int // the PR on each row
 	empty := ""
 	if m.list == panelMine {
 		for _, n := range m.prList() {
-			rows = append(rows, m.prRow(n, w-6))
+			rows, nums = append(rows, m.prRow(n, w-6)), append(nums, n)
 		}
 		empty = "no open PRs"
 	} else if m.list == panelReview {
 		for _, r := range m.toReview {
-			rows = append(rows, m.reviewRow(r, w-6))
+			rows, nums = append(rows, m.reviewRow(r, w-6)), append(nums, r.Number)
 		}
 		empty = "nothing waiting for your review"
 	} else {
 		for _, r := range m.reviewed {
-			rows = append(rows, m.reviewedRow(r, w-6))
+			rows, nums = append(rows, m.reviewedRow(r, w-6)), append(nums, r.Number)
 		}
 		empty = "you haven't reviewed any open PR"
+	}
+	nNew, fresh := m.whatsNew()
+	marked := map[int]bool{}
+	for i, n := range nums {
+		marked[i] = fresh[n]
 	}
 	listH := min(max(len(rows), 1), max(3, h*3/5-2)) + 2
 	var inner []string
 	if len(rows) == 0 {
 		inner = []string{"   " + comment.Render(empty)}
 	} else {
-		inner = window(rows, m.cursor[m.list], listH-2, w, m.inList)
+		inner = window(rows, m.cursor[m.list], listH-2, w, m.inList, marked)
 	}
-	lines := frame(m.listTitle(), inner, w, listH, m.inList)
+	lines := frame(m.listTitle(fresh), inner, w, listH, m.inList)
 
 	evRows, rowOf := m.eventRows(w - 6)
 	sel := -1
@@ -83,25 +90,47 @@ func (m *model) body(w, h int) []string {
 	if len(evRows) == 0 {
 		inner = []string{"   " + comment.Render("nothing yet: CI failures, reviews and comments on your PRs show up here")}
 	} else {
-		inner = window(evRows, sel, evH-2, w, !m.inList)
+		inner = window(evRows, sel, evH-2, w, !m.inList, nil)
 	}
 	title := text2.Render(fmt.Sprintf("Events %d", len(m.events)))
+	if nNew > 0 {
+		title += gutter.Render("  ·  ") + blue.Render(fmt.Sprintf("✦ %d new", nNew))
+	}
 	if n := m.waiting(); n > 0 {
 		title += gutter.Render("  ·  ") + yellow.Render(fmt.Sprintf("%d waiting", n))
 	}
 	return append(lines, frame(title, inner, w, evH, !m.inList)...)
 }
 
-func (m *model) listTitle() string {
-	tab := func(panel int, label string) string {
+// listTitle names the lists, each with how many of its PRs have something new.
+func (m *model) listTitle(fresh map[int]bool) string {
+	tab := func(panel int, label string, nums []int) string {
+		st := comment
 		if m.list == panel {
-			return bold.Render(label)
+			st = bold
 		}
-		return comment.Render(label)
+		n := 0
+		for _, pr := range nums {
+			if fresh[pr] {
+				n++
+			}
+		}
+		if n > 0 {
+			return st.Render(label) + blue.Render(fmt.Sprintf(" ✦%d", n))
+		}
+		return st.Render(label)
+	}
+	var review, reviewed []int
+	for _, r := range m.toReview {
+		review = append(review, r.Number)
+	}
+	for _, r := range m.reviewed {
+		reviewed = append(reviewed, r.Number)
 	}
 	sep := gutter.Render("  ·  ")
-	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs))) + sep + tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview))) +
-		sep + tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed))) + comment.Render("  ←→")
+	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs)), m.prList()) + sep +
+		tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview)), review) + sep +
+		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), reviewed) + comment.Render("  ←→")
 }
 
 // frame draws a rounded frame of w×h around lines, with the title in its top border. Focused frames are blue.
@@ -122,18 +151,19 @@ func frame(title string, lines []string, w, h int, focused bool) []string {
 }
 
 // window shows at most n of rows inside a frame w wide, scrolled so sel stays visible; sel gets the highlight
-// when the frame has the focus.
-func window(rows []string, sel, n, w int, focused bool) []string {
+// when the frame has the focus. The rows in marked have something new: a ✦ before them.
+func window(rows []string, sel, n, w int, focused bool, marked map[int]bool) []string {
 	start := 0
 	if sel >= 0 {
 		start = max(0, min(sel-n+1, len(rows)-n))
 	}
 	var out []string
 	for i := start; i < min(len(rows), start+n); i++ {
+		mark := map[bool]string{true: blue.Render("✦"), false: " "}[marked[i]]
 		if i == sel && focused {
-			out = append(out, onBg(" "+blue.Render("▎")+" "+lift.Replace(rows[i]), w-2, bgHLColor))
+			out = append(out, onBg(" "+blue.Render("▎")+mark+lift.Replace(rows[i]), w-2, bgHLColor))
 		} else {
-			out = append(out, "   "+rows[i])
+			out = append(out, "  "+mark+rows[i])
 		}
 	}
 	return out
@@ -331,7 +361,8 @@ var kinds = map[string]struct {
 	"approved": {"✓", green},
 }
 
-// eventRows lays the events out newest first, under a line per day. rowOf maps each event to its row.
+// eventRows lays the events out newest first, under a line per day, with a line under the new ones saying since
+// when. rowOf maps each event to its row.
 func (m *model) eventRows(w int) (rows []string, rowOf []int) {
 	day := ""
 	for i := range m.events {
@@ -341,7 +372,12 @@ func (m *model) eventRows(w int) (rows []string, rowOf []int) {
 			rows = append(rows, comment.Render(d+" ")+gutter.Render(strings.Repeat("─", max(0, w-len(d)-1))))
 		}
 		rowOf = append(rowOf, len(rows))
-		rows = append(rows, m.eventRow(e, w))
+		fresh := m.isNew(e)
+		rows = append(rows, m.eventRow(e, w, fresh))
+		if next, ok := m.shownEvent(i + 1); fresh && !(ok && m.isNew(next)) {
+			label := "↑ new since " + m.leftAt.Local().Format("15:04") + " "
+			rows = append(rows, blue.Render(label+strings.Repeat("─", max(0, w-lipgloss.Width(label)))))
+		}
 	}
 	return rows, rowOf
 }
@@ -358,22 +394,27 @@ func dayLabel(t time.Time) string {
 	return t.Local().Format("Mon 2 Jan")
 }
 
-// eventRow fades a delivered event; one that still needs you keeps its colour and names the key that acts on it.
-func (m *model) eventRow(e Event, w int) string {
+// eventRow fades a delivered event unless it's new, marked ✦ on the rail; one that still needs you keeps its colour
+// and names the key that acts on it.
+func (m *model) eventRow(e Event, w int, fresh bool) string {
 	text0, _ := splitURL(e.Text)
 	kind, rest, _ := strings.Cut(text0, " ")
 	k, ok := kinds[kind]
 	if !ok {
 		k.glyph, k.style = "•", text2
 	}
-	done := e.Status == Sent || e.Status == ForYou
+	done := (e.Status == Sent || e.Status == ForYou) && !fresh
 	dimIf := func(s lipgloss.Style) lipgloss.Style {
 		if done {
 			return faint
 		}
 		return s
 	}
-	left := comment.Render(e.At.Local().Format("15:04")) + gutter.Render(" │ ") + k.style.Render(k.glyph) + " " +
+	rail := gutter.Render(" │ ")
+	if fresh {
+		rail = blue.Render(" ✦ ")
+	}
+	left := comment.Render(e.At.Local().Format("15:04")) + rail + k.style.Render(k.glyph) + " " +
 		dimIf(text2).Render(fmt.Sprintf("#%-6d", e.PR)) + dimIf(k.style).Render(kind)
 	if rest != "" {
 		left += dimIf(text).Render(" " + rest)
@@ -450,6 +491,9 @@ func (m *model) statusLine(w int) string {
 	if n := m.waiting(); n > 0 {
 		right = pill(yellowColor).Render(fmt.Sprintf(" %d waiting ", n)) + right
 	}
+	if n, _ := m.whatsNew(); n > 0 {
+		right = pill(blueColor).Render(fmt.Sprintf(" ✦ %d new ", n)) + right
+	}
 	left := mode + state + middle
 	if lipgloss.Width(left)+lipgloss.Width(right) > w {
 		left = ansi.Truncate(left, max(0, w-lipgloss.Width(right)), "…")
@@ -484,7 +528,7 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 		inner = append(inner, " "+red.Render("no running Claude sessions, and no repo_dir configured to start one"))
 	}
 	n := max(1, min(len(rows), len(lines)-6))
-	inner = append(inner, window(rows, p.cursor, n, bw, true)...)
+	inner = append(inner, window(rows, p.cursor, n, bw, true, nil)...)
 	box := frame(accent.Render(fmt.Sprintf("Who owns #%d?", p.pr)), inner, bw, len(inner)+2, true)
 
 	x, y := (w-bw)/2, min(3, max(0, len(lines)-len(box)))

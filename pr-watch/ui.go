@@ -87,6 +87,9 @@ type model struct {
 	flash                          string
 	flashAt                        time.Time
 	quitArmed                      bool
+	away                           bool      // you left pr-watch's pane: the terminal reported it lost focus
+	leftAt, backAt                 time.Time // when you last left it and came back: what arrived in between is new
+	seenAt                         time.Time // the last sign you were looking: a key, or coming back to the pane
 
 	list   int  // which PR list is shown: panelMine or panelReview
 	inList bool // focus is on that list, not on the events
@@ -119,8 +122,10 @@ type picker struct {
 }
 
 func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
+	now := time.Now() // you just started it: you're looking, and nothing is new yet
 	m := &model{cfg: cfg, store: store, w: w, sender: sender, linkIdx: newLinkIndex(cfg.Repo), prs: w.snap,
-		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true}
+		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true,
+		leftAt: now, backAt: now, seenAt: now}
 	for _, e := range store.Pending() {
 		if e.Status == Sending { // the TUI quit mid-send; whether it arrived is unknown
 			e.Status, e.Note = Failed, "interrupted: pr-watch quit while sending"
@@ -320,7 +325,18 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.store.Hot() // look again soon, and keep watching while the queue works
 		}
 
+	case tea.FocusMsg:
+		now := time.Now()
+		if m.away && now.Sub(m.leftAt) < tabReturn {
+			m.leftAt = m.seenAt // you went to another tab some time after you were last seen here
+		}
+		m.away, m.backAt, m.seenAt = false, now, now
+
+	case tea.BlurMsg: // what was new has been seen
+		m.away, m.leftAt = true, time.Now()
+
 	case tea.KeyPressMsg:
+		m.seenAt = time.Now()
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
 		}
@@ -745,6 +761,28 @@ func (m *model) shownEvent(i int) (Event, bool) {
 		return Event{}, false
 	}
 	return m.events[len(m.events)-1-i], true
+}
+
+// tabReturn: zellij says nothing when you switch to another tab, and when you come back it blurs and focuses the pane
+// at once. A blur this close to a focus is that.
+const tabReturn = 250 * time.Millisecond
+
+// isNew: the event arrived while you were away from pr-watch's pane. zellij reports leaving it for another pane or
+// another app as you leave; for another tab, only once you're back, so you left when you were last seen.
+func (m *model) isNew(e Event) bool {
+	return e.At.After(m.leftAt) && (m.away || e.At.Before(m.backAt))
+}
+
+// whatsNew counts the new events and the PRs they're on.
+func (m *model) whatsNew() (n int, prs map[int]bool) {
+	prs = map[int]bool{}
+	for _, e := range m.events {
+		if m.isNew(e) {
+			n++
+			prs[e.PR] = true
+		}
+	}
+	return n, prs
 }
 
 // selectedPR is the PR the focused row is about, yours or one you reviewed, or 0.

@@ -51,6 +51,12 @@ Keep it open in a zellij tab while you want PRs watched; `q` stops it. While it'
 the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the
 list and the events, and `⏎` opens the selected PR in the browser.
 
+**What's new.** Coming back to pr-watch's pane, what happened while you were away is marked ✦: on its line in the
+events, before its PR, as a count on each list and in the status line, above a line saying since when. The marks
+go once you leave the pane again. zellij tells pr-watch when you move to another pane or another app; when you
+switch tabs, only once you're back, so then what's new is what arrived since you last pressed a key in pr-watch or
+came back to it.
+
 **Who owns a PR.** Claude Code records in a session's transcript which PR the session's branch belongs to
 (`"type":"pr-link"` lines; `claude --from-pr` uses them too). pr-watch reads those, so a PR's events go to the running
 session that opened it or last worked on it, marked *(linked)*, with nothing to set up. To route a PR elsewhere,

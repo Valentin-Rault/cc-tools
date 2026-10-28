@@ -342,9 +342,60 @@ func TestOpeningAPRWatchesClosely(t *testing.T) {
 // A highlighted row trades its darkest greys for a lighter one, so it stays readable on the highlight.
 func TestHighlightLiftsDimText(t *testing.T) {
 	row := comment.Render("09:12") + gutter.Render(" │ ") + text.Render("x")
-	got := window([]string{row}, 0, 1, 40, true)[0]
+	got := window([]string{row}, 0, 1, 40, true, nil)[0]
 	if strings.Contains(got, fgParam(commentColor)) || strings.Contains(got, fgParam(gutterColor)) || !strings.Contains(got, fgParam(dark5Color)) {
 		t.Errorf("highlighted row keeps its dim colours: %q", got)
+	}
+}
+
+// What arrived while you were away from pr-watch's pane is marked ✦ until you leave it again; what arrives while
+// you look isn't.
+func TestNewSinceYouLeft(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 160, 30
+	if strings.Contains(screen(m), "✦") {
+		t.Fatal("new at start")
+	}
+	m.update(tea.BlurMsg{})
+	time.Sleep(time.Millisecond)
+	m.events = append(m.events, Event{At: time.Now(), PR: 2720, Text: "review by carol https://gh/pr/2720#r2", Status: Sent})
+	time.Sleep(time.Millisecond)
+	m.update(tea.FocusMsg{})
+	m.events = append(m.events, Event{At: time.Now(), PR: 2731, Text: "comment by dave https://gh/pr/2731#c2", Status: Sent})
+	view := screen(m)
+	for _, want := range []string{"My PRs 3 ✦1", "✦#2720", "✦ ◇ #2720", "↑ new since ", "Events 5  ·  ✦ 1 new", " ✦ 1 new "} {
+		if !strings.Contains(view, want) {
+			t.Errorf("no %q in:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "✦#2731") {
+		t.Error("what arrived while you looked is marked new")
+	}
+	m.update(tea.BlurMsg{})
+	if strings.Contains(screen(m), "✦") {
+		t.Error("still new after you left again")
+	}
+}
+
+// Leaving for another tab, zellij says nothing; coming back, it blurs and focuses the pane at once. What arrived
+// since you last pressed a key or came back is new.
+func TestBackFromAnotherTab(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 160, 30
+	m.update(tea.KeyPressMsg{Code: tea.KeyDown})
+	time.Sleep(time.Millisecond)
+	m.events = append(m.events, Event{At: time.Now(), PR: 2720, Text: "review by carol https://gh/pr/2720#r2", Status: Sent})
+	time.Sleep(time.Millisecond)
+	m.update(tea.BlurMsg{})
+	m.update(tea.FocusMsg{})
+	if view := screen(m); !strings.Contains(view, "✦ ◇ #2720") {
+		t.Errorf("what arrived while you were in another tab isn't new:\n%s", view)
+	}
+	time.Sleep(time.Millisecond)
+	m.update(tea.BlurMsg{})
+	m.update(tea.FocusMsg{})
+	if strings.Contains(screen(m), "✦") {
+		t.Error("still new after you came back again")
 	}
 }
 

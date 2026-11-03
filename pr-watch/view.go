@@ -33,8 +33,8 @@ func (m *model) View() tea.View {
 	switch {
 	case m.search != nil:
 		help = m.searchLine()
-	case m.picker == nil && !m.showKeys && m.themePick == nil: // the clue to every other key
-		help += "  " + blue.Render("?") + faint.Render(" all keys")
+	case m.picker == nil && !m.showKeys && m.themePick == nil && m.keys.first("help") != "": // the clue to every other key
+		help += "  " + blue.Render(m.keys.first("help")) + faint.Render(" all keys")
 	}
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
@@ -142,7 +142,7 @@ func (m *model) listTitle(fresh map[int]bool) string {
 	sep := gutter.Render("  ·  ")
 	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs)), m.prList()) + sep +
 		tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview)), review) + sep +
-		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), reviewed) + comment.Render("  ←→")
+		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), reviewed) + comment.Render("  "+m.keys.firsts("left", "right"))
 }
 
 // frame draws a rounded frame of w×h around lines, with the title in its top border. Focused frames are blue.
@@ -250,9 +250,9 @@ func (m *model) ownerCell(pr int) string {
 	owner := m.ownerOf(pr)
 	if owner.Name == "" {
 		if s := m.suggest(pr); s != "" {
-			return yellow.Render("?") + faint.Render(" suggest "+s+" (o)")
+			return yellow.Render("?") + faint.Render(" suggest "+s+m.keys.say("owner", " (%s)", ""))
 		}
-		return yellow.Render("?") + faint.Render(" no owner (o)")
+		return yellow.Render("?") + faint.Render(" no owner"+m.keys.say("owner", " (%s)", ""))
 	}
 	_, explicit := m.owners[pr]
 	linked := map[bool]string{true: "", false: faint.Render(" (linked)")}[explicit]
@@ -452,14 +452,20 @@ func (m *model) eventRow(e Event, w int, fresh bool) string {
 		left += dimIf(text).Render(" " + rest)
 	}
 	to := cmp.Or(e.Owner, m.ownerOf(e.PR).Name, "?")
+	keyCap := func(action string) string {
+		if k := m.keys.first(action); k != "" {
+			return keycap.Render(" " + k + " ")
+		}
+		return ""
+	}
 	status := map[Status]string{
 		Sent:       green.Render("✓"),
-		NeedsOwner: yellow.Render("needs owner ") + keycap.Render(" o "),
-		Waiting:    yellow.Render("waiting ") + keycap.Render(" s "),
-		OwnerGone:  red.Render("owner gone ") + keycap.Render(" o "),
+		NeedsOwner: yellow.Render("needs owner ") + keyCap("owner"),
+		Waiting:    yellow.Render("waiting ") + keyCap("send"),
+		OwnerGone:  red.Render("owner gone ") + keyCap("owner"),
 		Sending:    yellow.Render("sending…"),
-		Failed:     red.Render("failed ") + keycap.Render(" s "),
-		ForYou:     text2.Render("for you ") + keycap.Render(" s "),
+		Failed:     red.Render("failed ") + keyCap("send"),
+		ForYou:     text2.Render("for you ") + keyCap("send"),
 	}[e.Status]
 	if e.Note != "" {
 		status += comment.Render("  " + e.Note)
@@ -599,17 +605,25 @@ func (m *model) help() string {
 	case m.picker != nil:
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	case m.showKeys:
-		return " ? or esc close"
+		return " " + m.keys.say("help", "%s or esc close", "esc close")
 	case m.themePick != nil:
 		return " ↑↓ try one  ⏎ keep it  esc put " + m.themePick.was + " back"
 	}
 	enter := map[int]string{panelMine: "open", panelReview: "open for review", panelReviewed: "open what changed since your review",
 		panelEvents: "open"}[m.panel()]
-	h := " ⏎ " + enter + "  / search"
-	if m.lastSearch != "" {
-		h += "  n/N next/prev  esc clear"
+	var parts []string
+	add := func(label, does string) {
+		if label != "" {
+			parts = append(parts, label+" "+does)
+		}
 	}
-	return h
+	add(m.keys.first("open"), enter)
+	add(m.keys.first("search"), "search")
+	if m.lastSearch != "" {
+		add(strings.Trim(m.keys.first("next_match")+"/"+m.keys.first("prev_match"), "/"), "next/prev")
+		add(m.keys.first("clear_search"), "clear")
+	}
+	return " " + strings.Join(parts, "  ")
 }
 
 func (m *model) waiting() int {

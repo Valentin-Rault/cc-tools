@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/charmbracelet/x/ansi"
@@ -23,9 +24,10 @@ type keyGroup struct {
 var panelNames = map[int]string{panelMine: "My PRs", panelReview: "To review", panelReviewed: "Reviewed", panelEvents: "the events"}
 
 // keyGroups: moving and finding, then what acts on the selected PR, then pr-watch itself.
+// Each row names the keys bound to its actions (keymap.go); an action that's off has no row.
 func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 	p, sel := m.panel(), m.selectedPR()
-	queue := keyRow{"m", "add your PR to the merge queue, or take it out", p != panelMine || sel == 0}
+	queue := keyRow{m.keys.label("queue"), "add your PR to the merge queue, or take it out", p != panelMine || sel == 0}
 	if !queue.off {
 		queue.does = fmt.Sprintf("add #%d to the merge queue", sel)
 		if m.prs[strconv.Itoa(sel)].Queued {
@@ -33,49 +35,65 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 		}
 	}
 	details := map[bool]string{true: "close the details", false: "details beside the lists"}[m.expanded]
-	auto := map[bool]string{true: "switch to manual: hold events until s", false: "switch to auto: send events as they come"}[m.auto]
+	auto := "switch to auto: send events as they come"
+	if m.auto {
+		auto = m.keys.say("send", "switch to manual: hold events until %s", "switch to manual: hold events")
+	}
 	pause := map[bool]string{true: "resume polling", false: "pause polling"}[m.paused]
-	move = keyGroup{"Move", []keyRow{
-		{"←→ h l", "My PRs, To review, Reviewed", false},
-		{"↑↓ j k", "up and down the list", false},
-		{"tab", "between the list and the events", false},
-	}}
-	find = keyGroup{"Find", []keyRow{
-		{"/", "a PR by number, title or author", false},
-		{"n N", "next and previous match", m.lastSearch == ""},
-		{"esc", "clear the search", m.lastSearch == ""},
-	}}
-	pr = keyGroup{"The selected PR", []keyRow{
-		{"⏎", map[int]string{panelMine: "open it on GitHub", panelReview: "open it for review",
+	k := m.keys.label
+	group := func(title string, rows ...keyRow) keyGroup {
+		return keyGroup{title, slices.DeleteFunc(rows, func(r keyRow) bool { return r.keys == "" })}
+	}
+	move = group("Move",
+		keyRow{k("left", "right"), "My PRs, To review, Reviewed", false},
+		keyRow{k("down", "up"), "up and down the list", false},
+		keyRow{k("switch_panel"), "between the list and the events", false},
+	)
+	find = group("Find",
+		keyRow{k("search"), "a PR by number, title or author", false},
+		keyRow{k("next_match", "prev_match"), "next and previous match", m.lastSearch == ""},
+		keyRow{k("clear_search"), "clear the search", m.lastSearch == ""},
+	)
+	pr = group("The selected PR",
+		keyRow{k("open"), map[int]string{panelMine: "open it on GitHub", panelReview: "open it for review",
 			panelReviewed: "open what changed since your review", panelEvents: "open the event's link"}[p], false},
-		{"e", details, false},
+		keyRow{k("details"), details, false},
 		queue,
-		{"o", "pick the Claude session that owns it", sel == 0},
-		{"s", "send its waiting events to the owner", sel == 0},
-		{"g", "go to the owner's pane", sel == 0},
-	}}
-	watch = keyGroup{"pr-watch", []keyRow{
-		{"a", auto, false},
-		{"p", pause, false},
-		{"r", "refresh now", false},
-		{"x", "forget owners and events of closed PRs", false},
-		{"t", "pick a theme: " + themeName + " now", false},
-		{"q", "quit", false},
-		{"?", "close this", false},
-	}}
+		keyRow{k("owner"), "pick the Claude session that owns it", sel == 0},
+		keyRow{k("send"), "send its waiting events to the owner", sel == 0},
+		keyRow{k("go_to_owner"), "go to the owner's pane", sel == 0},
+	)
+	watch = group("pr-watch",
+		keyRow{k("auto"), auto, false},
+		keyRow{k("pause"), pause, false},
+		keyRow{k("refresh"), "refresh now", false},
+		keyRow{k("purge"), "forget owners and events of closed PRs", false},
+		keyRow{k("theme"), "pick a theme: " + themeName + " now", false},
+		keyRow{k("quit"), "quit", false},
+		keyRow{k("help"), "close this", false},
+	)
 	return move, find, pr, watch
 }
 
-const keyColW = 9
+// keyColW is how wide the keys' column is: room for the longest, 9 at least.
+func keyColW(gs ...keyGroup) int {
+	w := 9
+	for _, g := range gs {
+		for _, r := range g.rows {
+			w = max(w, ansi.StringWidth(r.keys)+2)
+		}
+	}
+	return w
+}
 
-func (g keyGroup) lines() []string {
+func (g keyGroup) lines(colW int) []string {
 	out := []string{" " + accent.Render(g.title)}
 	for _, r := range g.rows {
 		k, d := blue.Render(r.keys), text.Render(r.does)
 		if r.off {
 			k, d = comment.Render(r.keys), comment.Render(r.does)
 		}
-		out = append(out, "  "+cell(k, keyColW)+d)
+		out = append(out, "  "+cell(k, colW)+d)
 	}
 	return out
 }
@@ -84,10 +102,12 @@ func (g keyGroup) lines() []string {
 // keys, if any, go across the bottom.
 func (m *model) overlayKeys(lines []string, w int) []string {
 	move, find, pr, watch := m.keyGroups()
+	plugins := keyGroup{"Plugins", m.pluginRows()}
+	kw := keyColW(move, find, pr, watch, plugins)
 	width := func(gs ...keyGroup) int {
 		n := 0
 		for _, g := range gs {
-			for _, l := range g.lines() {
+			for _, l := range g.lines(kw) {
 				n = max(n, ansi.StringWidth(l)+2)
 			}
 		}
@@ -100,14 +120,13 @@ func (m *model) overlayKeys(lines []string, w int) []string {
 			if i > 0 {
 				out = append(out, "")
 			}
-			out = append(out, g.lines()...)
+			out = append(out, g.lines(kw)...)
 		}
 		return out
 	}
-	plugins := keyGroup{"Plugins", m.pluginRows()}
 	var below []string
 	if len(plugins.rows) > 0 {
-		below = append([]string{""}, plugins.lines()...)
+		below = append([]string{""}, plugins.lines(kw)...)
 	}
 	var inner []string
 	bw := min(w-4, max(2*colW, width(plugins))+2)

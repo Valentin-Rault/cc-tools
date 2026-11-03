@@ -135,6 +135,22 @@ override it):
 review some PRs need (optional). `theme` is what `t` last picked. State lives in `~/.pr-watch/`
 (`PR_WATCH_DIR`); `events.log` there is the history of everything detected and sent.
 
+**Keys.** `"keys"` in the config binds actions to other keys:
+
+```json
+"keys": {"queue": "", "send": "S", "go_to_owner": ["g", "G"], "down": ["j", "down", "ctrl+n"]}
+```
+
+- **Binding:** an action's keys replace its defaults; `""` turns it off (`"queue": ""` for no merge-queue key at all).
+  Keys are written the way pr-watch names them: `a`, `A`, `ctrl+x`, `enter`, `esc`, `tab`, `up`, `space`, `f5`.
+- **Clashes:** your key wins over another action's default, which loses it. A key you give two actions does
+  neither. pr-watch says both at startup, and so does `pr-watch keys`, which lists every action, its keys and what
+  it does.
+- **Always the same:** `ctrl+c` always quits. The pickers and the search prompt keep `⏎`, `esc` and `backspace`,
+  and follow your `up` and `down`.
+- **Everywhere:** the `?` popup, the key help, the hints and the messages name the keys you bound.
+- **Plugins** can have any key no action has, so a remap can free one for them.
+
 ### Tabs by stage
 
 With `"arrange_tabs": true` in the config, pr-watch keeps each Claude session that works in the repo in the zellij

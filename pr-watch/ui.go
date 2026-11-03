@@ -108,6 +108,7 @@ type model struct {
 	noticed        map[string]bool // plugins already said to be new, changed or broken, as they are now
 
 	themePick *themePicker // t is open
+	keys      keymap
 }
 
 type choiceKind int
@@ -137,9 +138,16 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 	m := &model{cfg: cfg, store: store, w: w, sender: sender, linkIdx: newLinkIndex(cfg.Repo), prs: w.snap,
 		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true,
 		leftAt: now, backAt: now, seenAt: now}
+	m.keys = newKeymap(cfg.Keys)
+	var notes []string
 	if cfg.Theme != "" && !useTheme(cfg.Theme) {
-		m.flash = fmt.Sprintf("no theme %q in the config: t picks one of %s", cfg.Theme, strings.Join(themeNames(), ", "))
+		notes = append(notes, fmt.Sprintf("no theme %q in the config: %s", cfg.Theme,
+			m.keys.say("theme", "%s picks one of "+strings.Join(themeNames(), ", "), "it's one of "+strings.Join(themeNames(), ", "))))
 	}
+	if len(m.keys.notes) > 0 {
+		notes = append(notes, "keys: "+strings.Join(m.keys.notes, " · "))
+	}
+	m.flash = strings.Join(notes, " · ")
 	for _, e := range store.Pending() {
 		if e.Status == Sending { // the TUI quit mid-send; whether it arrived is unknown
 			e.Status, e.Note = Failed, "interrupted: pr-watch quit while sending"
@@ -353,7 +361,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.err != nil:
 			m.flash = fmt.Sprintf("#%d: %v", msg.pr, msg.err)
 		case msg.queued:
-			m.flash = fmt.Sprintf("#%d added to the merge queue · m again takes it out", msg.pr)
+			m.flash = fmt.Sprintf("#%d added to the merge queue", msg.pr) + m.keys.say("queue", " · %s again takes it out", "")
 			m.log(msg.pr, "added to the merge queue from pr-watch")
 		default:
 			m.flash = fmt.Sprintf("#%d taken out of the merge queue", msg.pr)
@@ -382,9 +390,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.themeKey(msg.String())
 			return m, nil
 		}
-		if m.showKeys { // only closing it: q there mustn't quit
-			switch msg.String() {
-			case "?", "esc", "q", "ctrl+c":
+		if m.showKeys { // only closing it: quitting's key there mustn't quit
+			if k := msg.String(); k == "esc" || k == "ctrl+c" || m.keys.action[k] == "help" || m.keys.action[k] == "quit" {
 				m.showKeys = false
 			}
 			return m, nil
@@ -414,91 +421,99 @@ func (m *model) focus(panel int) {
 	}
 }
 
+// key does the action bound to k (keymap.go), or runs the plugin that has it.
 func (m *model) key(k string) (tea.Model, tea.Cmd) {
-	if k != "q" {
+	act := m.keys.action[k]
+	if act != "quit" {
 		m.quitArmed = false
 	}
-	switch k {
-	case "q", "ctrl+c":
-		if len(m.inflight) > 0 && !m.quitArmed && k == "q" {
+	switch act {
+	case "quit":
+		if len(m.inflight) > 0 && !m.quitArmed && k != "ctrl+c" {
 			m.quitArmed = true
-			m.flash = fmt.Sprintf("%d send(s) still running: press q again to quit anyway", len(m.inflight))
+			m.flash = fmt.Sprintf("%d send(s) still running: press %s again to quit anyway", len(m.inflight), prettyKey(k))
 			return m, nil
 		}
 		m.savePending()
 		return m, tea.Quit
-	case "left", "h", "right", "l":
+	case "left", "right":
 		if !m.inList { // from the events, back to the list they sit under
 			m.focus(m.list)
-		} else if k == "left" || k == "h" {
+		} else if act == "left" {
 			m.focus(max(panelMine, m.list-1))
 		} else {
 			m.focus(min(panelReviewed, m.list+1))
 		}
-	case "tab", "shift+tab": // between the list and the events; ←→ pick the list
+	case "switch_panel": // between the list and the events; left and right pick the list
 		if m.inList {
 			m.focus(panelEvents)
 		} else {
 			m.focus(m.list)
 		}
-	case "up", "k":
+	case "up":
 		m.cursor[m.panel()] = max(0, m.cursor[m.panel()]-1)
-	case "down", "j":
+	case "down":
 		m.cursor[m.panel()] = max(0, min(m.rows(m.panel())-1, m.cursor[m.panel()]+1))
-	case "enter":
+	case "open":
 		if url := m.selectedURL(); url != "" {
 			exec.Command("open", url).Start()
 			// you're likely about to review, merge or comment, and GitHub won't tell pr-watch: watch closely a while
 			m.store.Hot()
 		}
-	case "r":
+	case "refresh":
 		if !m.polling {
 			m.polling = true
 			m.flash = "refreshing"
 			return m, m.pollCmd(true)
 		}
-	case "p":
+	case "pause":
 		m.paused = !m.paused
-		m.flash = map[bool]string{true: "paused: no polling until p", false: "resumed"}[m.paused]
+		m.flash = "resumed"
+		if m.paused {
+			m.flash = m.keys.say("pause", "paused: no polling until %s", "paused")
+		}
 		m.nextPoll = time.Now()
-	case "a":
+	case "auto":
 		m.auto = !m.auto
-		m.flash = map[bool]string{true: "auto: events go out as they come", false: "manual: events wait for s"}[m.auto]
+		m.flash = "auto: events go out as they come"
+		if !m.auto {
+			m.flash = m.keys.say("send", "manual: events wait for %s", "manual: events wait")
+		}
 		return m, m.dispatch()
-	case "x":
+	case "purge":
 		m.purge()
-	case "?":
+	case "help":
 		m.showKeys = true
-	case "t":
+	case "theme":
 		m.openThemes()
-	case "/":
+	case "search":
 		m.openSearch()
-	case "n", "N":
-		m.searchAgain(k == "N")
-	case "esc":
+	case "next_match", "prev_match":
+		m.searchAgain(act == "prev_match")
+	case "clear_search":
 		m.lastSearch = ""
-	case "e":
+	case "details":
 		m.expanded = !m.expanded
-	case "m":
+	case "queue":
 		return m, m.toggleQueue(m.selectedPR())
-	case "o", "s", "g":
+	case "owner", "send", "go_to_owner":
 		pr := m.selectedPR()
 		if pr == 0 {
 			m.flash = "select one of your PRs, a PR you reviewed, or an event first"
 			return m, nil
 		}
-		switch k {
-		case "o":
+		switch act {
+		case "owner":
 			m.openPicker(pr)
-		case "s":
+		case "send":
 			return m, m.send(pr, func(e Event) bool { return e.Status != Sent && e.Status != Sending })
-		case "g":
+		case "go_to_owner":
 			if s, ok := resolve(m.sessions, m.ownerOf(pr)); ok {
 				return m, func() tea.Msg { return jumpMsg{jumpTo(s.Pid)} }
 			}
 			m.flash = fmt.Sprintf("#%d has no running owner to go to", pr)
 		}
-	default:
+	case "":
 		return m, m.pluginKey(k)
 	}
 	return m, nil
@@ -573,13 +588,13 @@ func (m *model) openPicker(pr int) {
 
 func (m *model) pickerKey(k string) tea.Cmd {
 	p := m.picker
+	if step := m.keys.step(k); step != 0 {
+		p.cursor = max(0, min(len(p.choices)-1, p.cursor+step))
+		return nil
+	}
 	switch k {
 	case "esc", "q":
 		m.picker = nil
-	case "up", "k":
-		p.cursor = max(0, p.cursor-1)
-	case "down", "j":
-		p.cursor = max(0, min(len(p.choices)-1, p.cursor+1))
 	case "enter":
 		m.picker = nil
 		if p.cursor >= len(p.choices) {
@@ -693,7 +708,7 @@ func (m *model) dispatch() tea.Cmd {
 func (m *model) send(pr int, include func(Event) bool) tea.Cmd {
 	owner := m.ownerOf(pr)
 	if owner.Name == "" {
-		m.flash = fmt.Sprintf("#%d has no owner: press o to pick one", pr)
+		m.flash = fmt.Sprintf("#%d has no owner", pr) + m.keys.say("owner", ": press %s to pick one", "")
 		return nil
 	}
 	if m.inflight[pr] {
@@ -995,10 +1010,10 @@ func (m *model) toggleQueue(pr int) tea.Cmd {
 	s, mine := m.prs[strconv.Itoa(pr)]
 	switch {
 	case !mine:
-		m.flash = "m queues your own PRs: select one in My PRs"
+		m.flash = m.keys.say("queue", "%s queues your own PRs: select one in My PRs", "only your own PRs go in the merge queue")
 		return nil
 	case s.NodeID == "":
-		m.flash = "pr-watch doesn't know this PR's ID yet: refresh with r first"
+		m.flash = "pr-watch doesn't know this PR's ID yet" + m.keys.say("refresh", ": refresh with %s first", ": wait for the next refresh")
 		return nil
 	case m.w == nil || m.w.gh == nil:
 		return nil

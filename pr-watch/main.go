@@ -14,7 +14,8 @@ const usage = `pr-watch                          open the TUI: watch your open P
 pr-watch claim <session> <pr>...  route those PRs' events to that Claude session
 pr-watch send <session> [text]    test delivery: send text (or a sample event) to a session, print the outcome
 pr-watch tabs                     show which zellij tab each Claude session would move to, without moving any
-pr-watch plugins [allow|deny|try] list, allow and try your plugins (pr-watch plugins help)`
+pr-watch plugins [allow|deny|try] list, allow and try your plugins (pr-watch plugins help)
+pr-watch keys                     list the actions and their keys, as the config's "keys" binds them`
 
 func main() {
 	store := Store{Dir: stateDir()}
@@ -49,6 +50,12 @@ func main() {
 		if err := printTabsPlan(store); err != nil {
 			fail(err)
 		}
+	case args[0] == "keys" && len(args) == 1:
+		cfg, err := loadConfig()
+		if err != nil {
+			fail(err)
+		}
+		printKeys(os.Stdout, newKeymap(cfg.Keys))
 	case args[0] == "plugins":
 		cfg, err := loadConfig()
 		if err != nil {

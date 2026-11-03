@@ -25,11 +25,6 @@ type (
 	}
 )
 
-// builtinKeys are pr-watch's own keys: they always win over a plugin's. key() is the authority; this list is what
-// the ? popup tells plugin authors.
-var builtinKeys = []string{"q", "ctrl+c", "left", "h", "right", "l", "tab", "shift+tab", "up", "k", "down", "j", "enter",
-	"r", "p", "a", "x", "?", "/", "n", "N", "esc", "e", "m", "o", "s", "g", "t"}
-
 func (m *model) loadPluginsCmd() tea.Cmd {
 	if m.cfg.PluginsDir == "" || m.loadingPlugins {
 		return nil
@@ -158,13 +153,13 @@ type pluginBinding struct {
 	key    pluginKey
 }
 
-// pluginBindings are the keys of the allowed plugins, but pr-watch's own; when two plugins want a key, the first by
-// name has it.
+// pluginBindings are the keys of the allowed plugins, but the ones bound to pr-watch's actions (keymap.go), which win;
+// when two plugins want a key, the first by name has it.
 func (m *model) pluginBindings() map[string]pluginBinding {
 	out := map[string]pluginBinding{}
 	for _, p := range m.plugins {
 		for _, k := range p.Keys {
-			if _, taken := out[k.Key]; p.Allowed && !taken && !slices.Contains(builtinKeys, k.Key) {
+			if _, taken := out[k.Key]; p.Allowed && !taken && m.keys.action[k.Key] == "" {
 				out[k.Key] = pluginBinding{p, k}
 			}
 		}
@@ -210,8 +205,8 @@ func (m *model) pluginRows() []keyRow {
 		for _, k := range p.Keys {
 			r := keyRow{k.Key, k.Does + " · " + p.Name, false}
 			switch b := bound[k.Key]; {
-			case slices.Contains(builtinKeys, k.Key):
-				r.does, r.off = r.does+": pr-watch's key", true
+			case m.keys.action[k.Key] != "":
+				r.does, r.off = r.does+": pr-watch's key for "+m.keys.action[k.Key], true
 			case b.plugin.Name != p.Name:
 				r.does, r.off = r.does+": "+b.plugin.Name+"'s key", true
 			}

@@ -28,7 +28,9 @@ type Config struct {
 	PluginsDir string `json:"plugins_dir"`
 	// Theme is the colorscheme, one of themes (theme.go); t picks one and writes it here.
 	Theme string `json:"theme"`
-	File  string `json:"-"` // where the config was read from
+	// Keys binds actions to other keys than their defaults (keymap.go): {"send": "S", "queue": ""}.
+	Keys map[string]keyList `json:"keys"`
+	File string             `json:"-"` // where the config was read from
 }
 
 func configPath() string {

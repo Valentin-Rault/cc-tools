@@ -29,16 +29,14 @@ func (m *model) openThemes() {
 
 func (m *model) themeKey(k string) {
 	p := m.themePick
-	switch k {
-	case "up", "k":
-		p.cursor = max(0, p.cursor-1)
-	case "down", "j":
-		p.cursor = min(len(themes)-1, p.cursor+1)
-	case "esc", "q", "ctrl+c":
+	switch step := m.keys.step(k); {
+	case step != 0:
+		p.cursor = max(0, min(len(themes)-1, p.cursor+step))
+	case k == "esc" || k == "q" || k == "ctrl+c":
 		useTheme(p.was)
 		m.themePick = nil
 		return
-	case "enter":
+	case k == "enter":
 		m.themePick = nil
 		m.cfg.Theme = themeName
 		if m.cfg.File == "" {

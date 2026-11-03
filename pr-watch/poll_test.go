@@ -226,7 +226,7 @@ func TestDesktopNotificationsAreOptIn(t *testing.T) {
 	}
 }
 
-// A PR that leaves your open PRs (merged or closed) loses its owner on the next refresh.
+// A PR that leaves your open PRs (merged or closed) loses its owner on the next refresh; a merge is told apart.
 func TestClosedPRsLoseTheirOwner(t *testing.T) {
 	store := Store{Dir: t.TempDir()}
 	store.SaveSnapshot(map[string]Stored{"1": {Seen: []string{"R0", "R1", "R2", "C3", "C4"}}, "5": {}})
@@ -234,8 +234,8 @@ func TestClosedPRsLoseTheirOwner(t *testing.T) {
 	w, gh, _ := newTestWatcher(t, store)
 	gh.states = map[int]string{5: "MERGED"}
 	r := w.Poll(true)
-	if len(r.Closed) != 1 || r.Closed[0] != 5 {
-		t.Errorf("closed = %v", r.Closed)
+	if !slices.Equal(r.Closed, []int{5}) || !slices.Equal(r.Merged, []int{5}) {
+		t.Errorf("closed = %v, merged %v", r.Closed, r.Merged)
 	}
 	if o := store.Owners(); len(o) != 1 || o[1].Name != "feat-a" {
 		t.Errorf("owners = %v", o)
@@ -310,8 +310,8 @@ func TestReviewedPRsInThePoll(t *testing.T) {
 	gh.search.Reviewed.Nodes[0].Commits.Nodes = []struct{ Commit struct{ Oid string } }{{struct{ Oid string }{"h7"}}, {struct{ Oid string }{"h8"}}}
 	gh.states = map[int]string{99: "CLOSED"}
 	r := w.Poll(true)
-	if !slices.Equal(r.Closed, []int{99}) {
-		t.Errorf("closed = %v", r.Closed)
+	if !slices.Equal(r.Closed, []int{99}) || len(r.Merged) != 0 {
+		t.Errorf("closed = %v, merged %v", r.Closed, r.Merged)
 	}
 	if o := store.Owners(); len(o) != 1 || o[8].Name != "rev-session" {
 		t.Errorf("owners = %v", o)

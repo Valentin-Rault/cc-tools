@@ -30,7 +30,7 @@ make test
 │   09:13 │ ✎ #2731  comment by bob                           → feat-ledger      ✓                    │
 │   09:12 │ ✗ #2720  ci-failed on 3f9a2c1: lint, deploy       → feat-rollback    ✓                    │
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
- ←→ lists  ↑↓ move  / search  ⏎ open  o owner  s send  g go to owner  x purge  tab events  r refresh  q quit
+ ⏎ open  / search  ? all keys
  AUTO  ● watching · next 42s   3 open   1 failing   1 queued   2 to review     1 waiting  acme/widgets
 ```
 
@@ -45,7 +45,8 @@ queue, at the commit you see; `m` on a queued one takes it out again, so a slip 
 merge directly: that can't be undone. *Reviewed* lists the open PRs
 of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in
 your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review. A
-PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen.
+PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen, and so does `?`: every
+key, the ones that do nothing where you are dimmed. The key help under the lists keeps to `⏎`, search and `?`.
 
 `/` finds a PR, the vim way: type its number (all of it or some digits, `#` optional) or words from its title or
 its author's login. The cursor goes to the first match below it as you type, switching list when the match is in

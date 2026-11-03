@@ -56,7 +56,7 @@ func TestView(t *testing.T) {
 		if got := strings.Count(view, "\n") + 1; got != size[1] {
 			t.Errorf("%dx%d view has %d lines", size[0], size[1], got)
 		}
-		if !strings.Contains(view, "←→") {
+		if !strings.Contains(view, "? all keys") {
 			t.Errorf("%dx%d view lost the key help:\n%s", size[0], size[1], view)
 		}
 		if size[0] < 100 {
@@ -232,13 +232,16 @@ func TestReviewDetails(t *testing.T) {
 	press(m, "e")
 	v := screen(m)
 	for _, want := range []string{"╭─ #2711", "by bob", "⧗ in the merge queue (2nd)", "it may merge before you review it",
-		"✓ checks passing", "✓ carl approved", "security approved", "+412 −38  ▰▰▰▱▱", "waited   2d", "e close"} {
+		"✓ checks passing", "✓ carl approved", "security approved", "+412 −38  ▰▰▰▱▱", "waited   2d"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("details lack %q:\n%s", want, v)
 		}
 	}
 	if got := strings.Count(v, "\n") + 1; got != 26 {
 		t.Errorf("screen has %d lines", got)
+	}
+	if got := keyDoes(m, "e"); got != "close the details" {
+		t.Errorf("? says e does %q", got)
 	}
 	press(m, "left")
 	if v := screen(m); !strings.Contains(v, "╭─ #2740") || !strings.Contains(v, "owner") {
@@ -578,8 +581,8 @@ func TestMergeQueueToggle(t *testing.T) {
 	}
 
 	m.cursor[panelMine] = 2 // #2720, not queued
-	if !strings.Contains(m.help(), "m merge") {
-		t.Errorf("help = %q", m.help())
+	if got := keyDoes(m, "m"); got != "add #2720 to the merge queue" {
+		t.Errorf("? says m does %q", got)
 	}
 	run()
 	if !slices.Equal(gh.queued, []string{"enqueue PR_a abc123"}) || !strings.Contains(m.flash, "added to the merge queue · m again takes it out") {
@@ -590,8 +593,8 @@ func TestMergeQueueToggle(t *testing.T) {
 	}
 
 	m.cursor[panelMine] = 0 // #2740, queued
-	if !strings.Contains(m.help(), "m unqueue") {
-		t.Errorf("help = %q", m.help())
+	if got := keyDoes(m, "m"); got != "take #2740 out of the merge queue" {
+		t.Errorf("? says m does %q", got)
 	}
 	run()
 	if gh.queued[1] != "dequeue PR_b" || m.store.read("dequeued") != "2740" || !strings.Contains(m.flash, "taken out of the merge queue") {

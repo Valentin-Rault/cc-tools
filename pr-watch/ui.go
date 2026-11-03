@@ -96,6 +96,7 @@ type model struct {
 	cursor [4]int
 	picker *picker
 
+	showKeys   bool    // ? floats every key over the screen
 	search     *search // / is open
 	lastSearch string  // what n and N look for; its matches stay highlighted until esc
 	width      int
@@ -343,6 +344,13 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
 		}
+		if m.showKeys { // only closing it: q there mustn't quit
+			switch msg.String() {
+			case "?", "esc", "q", "ctrl+c":
+				m.showKeys = false
+			}
+			return m, nil
+		}
 		if m.search != nil {
 			m.searchKey(msg.String(), msg.Text)
 			return m, nil
@@ -421,6 +429,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, m.dispatch()
 	case "x":
 		m.purge()
+	case "?":
+		m.showKeys = true
 	case "/":
 		m.openSearch()
 	case "n", "N":

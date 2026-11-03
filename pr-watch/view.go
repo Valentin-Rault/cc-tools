@@ -30,11 +30,17 @@ func (m *model) View() tea.View {
 		}
 	}
 	help := faint.Render(m.help())
-	if m.search != nil {
+	switch {
+	case m.search != nil:
 		help = m.searchLine()
+	case m.picker == nil && !m.showKeys: // the clue to every other key
+		help += "  " + blue.Render("?") + faint.Render(" all keys")
 	}
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
+	}
+	if m.showKeys {
+		lines = m.overlayKeys(lines, w)
 	}
 	lines = append(lines, help, m.statusLine(w))
 	if len(lines) > h { // a short terminal: cut the panels, keep the key help and status line
@@ -542,7 +548,11 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 	n := max(1, min(len(rows), len(lines)-6))
 	inner = append(inner, window(rows, p.cursor, n, bw, true, nil)...)
 	box := frame(accent.Render(fmt.Sprintf("Who owns #%d?", p.pr)), inner, bw, len(inner)+2, true)
+	return floatOver(lines, box, w, bw)
+}
 
+// floatOver dims the screen and lays box, bw wide, over it: centred, near the top.
+func floatOver(lines, box []string, w, bw int) []string {
 	x, y := (w-bw)/2, min(3, max(0, len(lines)-len(box)))
 	out := make([]string, len(lines))
 	for i, l := range lines {
@@ -558,29 +568,21 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 	return out
 }
 
+// help is the short key help under the lists: what ⏎ does there, and search; ? shows every key.
 func (m *model) help() string {
-	common := "  r refresh  p pause  a auto  q quit"
-	if m.picker != nil {
+	switch {
+	case m.picker != nil:
 		return " ↑↓ move  ⏎ choose  esc cancel"
+	case m.showKeys:
+		return " ? or esc close"
 	}
-	move := "  ↑↓ move  / search" // early: the key help is cut on a narrow terminal
+	enter := map[int]string{panelMine: "open", panelReview: "open for review", panelReviewed: "open what changed since your review",
+		panelEvents: "open"}[m.panel()]
+	h := " ⏎ " + enter + "  / search"
 	if m.lastSearch != "" {
-		move += "  n/N next/prev  esc clear"
+		h += "  n/N next/prev  esc clear"
 	}
-	e := map[bool]string{true: "  e close", false: "  e details"}[m.expanded]
-	switch m.panel() {
-	case panelMine:
-		q := "  m merge"
-		if prs := m.prList(); m.cursor[panelMine] < len(prs) && m.prs[strconv.Itoa(prs[m.cursor[panelMine]])].Queued {
-			q = "  m unqueue"
-		}
-		return " ←→ lists" + move + "  ⏎ open" + e + q + "  o owner  s send  g go to owner  x purge  tab events" + common
-	case panelReview:
-		return " ←→ lists" + move + "  ⏎ open for review" + e + "  tab events" + common
-	case panelReviewed:
-		return " ←→ lists" + move + "  ⏎ open what changed since your review" + e + "  tab events" + common
-	}
-	return strings.TrimPrefix(move, " ") + "  ⏎ open" + e + "  o owner  s send/resend  g go to owner  tab list" + common
+	return h
 }
 
 func (m *model) waiting() int {

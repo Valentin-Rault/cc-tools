@@ -53,7 +53,7 @@ func describeTool(tool string, input json.RawMessage) string {
 	return oneLine(tool, 300)
 }
 
-// truthy is Python's truth for a JSON value.
+// truthy: a JSON value is there, and isn't empty, zero or false.
 func truthy(v any) bool {
 	switch v := v.(type) {
 	case nil:

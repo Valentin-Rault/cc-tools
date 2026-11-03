@@ -195,7 +195,7 @@ func TestHook(t *testing.T) {
 	}
 }
 
-// A state the Python version wrote reads the same, and one written here has the Python version's keys.
+// A state file the earlier Python version wrote reads the same, and one written here has the same keys.
 func TestStateFilesAreThePythonOnes(t *testing.T) {
 	t.Setenv("CC_STATUS_DIR", t.TempDir())
 	os.MkdirAll(sessionsDir(), 0o755)

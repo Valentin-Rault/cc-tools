@@ -257,8 +257,7 @@ pr-watch plugins allow confetti        # pr-watch plugins deny confetti stops it
 
 Which Claude Code sessions in your zellij or tmux panes need you: ● needs you (permission, question, plan approval),
 ✓ finished and not visited yet, ◐ working. It's driven by Claude Code hooks, and shares its zellij and tmux code
-with pr-watch (`internal/mux`). `cc-status/cc-status.py` is the earlier Python version, kept for now: it reads and writes
-the same state files, so linking it to `~/.local/bin/cc-status` switches back.
+with pr-watch (`internal/mux`).
 
 ```sh
 cc-status ui     # pick a session and jump to it; meant for a floating zellij pane or a tmux popup

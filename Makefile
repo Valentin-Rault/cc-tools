@@ -19,8 +19,7 @@ test:
 	hooks/pr-guard_test.sh
 
 # pr-watch and cc-status are copied (what runs keeps its old binary) and linked onto PATH; pr-guard is symlinked so
-# edits here are live. The Python cc-status (cc-status/cc-status.py) is the previous version: linking it to
-# ~/.local/bin/cc-status instead switches back.
+# edits here are live.
 install: build
 	install -d $(dir $(PR_WATCH)) $(dir $(CC_STATUS)) $(HOME)/.local/bin $(HOME)/.claude/hooks
 	install -m 755 bin/pr-watch $(PR_WATCH)

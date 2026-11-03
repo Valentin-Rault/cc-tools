@@ -175,7 +175,7 @@ func sortedKeys[K int | string, V any](m map[K]V) []K {
 
 func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
-// painter colours the overview: ansiPainter as the Python version did for list, themePainter for the popup.
+// painter colours the overview: ansiPainter in the terminal's own colours for list, themePainter for the popup.
 type painter interface {
 	heading(s string) string
 	dim(s string) string
@@ -342,7 +342,7 @@ func isHostname(title string) bool {
 
 func cmdList() {
 	w := 120
-	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 { // like Python's shutil.get_terminal_size
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 { // $COLUMNS first, else the terminal's
 		w = n
 	} else if cols, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
 		w = cols

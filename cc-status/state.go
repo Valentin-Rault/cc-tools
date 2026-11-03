@@ -17,8 +17,8 @@ import (
 	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
-// Where cc-status keeps a state file per session, and its log. The format is the Python version's: either can read
-// what the other wrote.
+// Where cc-status keeps a state file per session, and its log. The format is the one the earlier Python version
+// wrote, so the state files it left still read.
 func stateDir() string {
 	if d := os.Getenv("CC_STATUS_DIR"); d != "" {
 		return d
@@ -57,7 +57,7 @@ type state struct {
 	Detail    string  `json:"detail"`
 	Since     float64 `json:"since"`          // Unix seconds
 	Zellij    string  `json:"zellij"`         // the zellij session, or "" in tmux
-	Tmux      string  `json:"tmux,omitempty"` // the tmux server's socket; absent in zellij, as the Python version wrote
+	Tmux      string  `json:"tmux,omitempty"` // the tmux server's socket; absent in zellij, as before tmux
 	Pane      int     `json:"pane"`
 	Cwd       string  `json:"cwd"`
 	Pid       *int    `json:"pid"` // the claude process; null when it wasn't found

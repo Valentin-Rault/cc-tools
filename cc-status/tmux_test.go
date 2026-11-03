@@ -82,7 +82,7 @@ func TestTmux(t *testing.T) {
 	if len(rows) != 2 || rows[0].srv != mux.Tmux(socket) || rows[0].state != done || rows[1].tab != "Work" {
 		t.Fatalf("rows = %+v", rows)
 	}
-	lines := strings.Join(layout(rows, 0, 100, 30, false, true), "\n")
+	lines := strings.Join(layout(rows, 0, 100, 30, ansiPainter{}, true, "keys"), "\n")
 	if want := "tmux s › " + autoName + " › " + panes["b"] + " · other"; !strings.Contains(lines, want) { // its socket is s
 		t.Errorf("the selected row's detail lacks %q:\n%s", want, lines)
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/Valentin-Rault/cc-tools/internal/theme"
 )
 
 // The theme picker: t floats the themes over the screen, which takes on the one under the cursor as you move, so you
@@ -29,9 +30,9 @@ func (m *model) openThemes() {
 
 func (m *model) themeKey(k string) {
 	p := m.themePick
-	switch step := m.keys.step(k); {
+	switch step := m.keys.Step(k); {
 	case step != 0:
-		p.cursor = max(0, min(len(themes)-1, p.cursor+step))
+		p.cursor = max(0, min(len(theme.Themes)-1, p.cursor+step))
 	case k == "esc" || k == "q" || k == "ctrl+c":
 		useTheme(p.was)
 		m.themePick = nil
@@ -48,21 +49,21 @@ func (m *model) themeKey(k string) {
 		}
 		return
 	}
-	useTheme(themes[p.cursor].name)
+	useTheme(theme.Themes[p.cursor].Name)
 }
 
 // overlayThemes lists the themes, each with a swatch of its colours on its own background.
 func (m *model) overlayThemes(lines []string, w int) []string {
 	const nameW = 20
 	var rows []string
-	for _, t := range themes {
-		on := lipgloss.NewStyle().Background(lipgloss.Color(t.bg))
+	for _, t := range theme.Themes {
+		on := lipgloss.NewStyle().Background(lipgloss.Color(t.Bg))
 		swatch := on.Render(" ")
-		for _, c := range []string{t.blue, t.cyan, t.magenta, t.green, t.yellow, t.orange, t.red} {
+		for _, c := range []string{t.Blue, t.Cyan, t.Magenta, t.Green, t.Yellow, t.Orange, t.Red} {
 			swatch += on.Foreground(lipgloss.Color(c)).Render("● ")
 		}
-		row := cell(text.Render(t.name), nameW) + swatch
-		if t.light {
+		row := cell(text.Render(t.Name), nameW) + swatch
+		if t.Light {
 			row += faint.Render("  light")
 		}
 		rows = append(rows, row)

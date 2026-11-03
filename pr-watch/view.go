@@ -33,8 +33,8 @@ func (m *model) View() tea.View {
 	switch {
 	case m.search != nil:
 		help = m.searchLine()
-	case m.picker == nil && !m.showKeys && m.themePick == nil && m.keys.first("help") != "": // the clue to every other key
-		help += "  " + blue.Render(m.keys.first("help")) + faint.Render(" all keys")
+	case m.picker == nil && !m.showKeys && m.themePick == nil && m.keys.First("help") != "": // the clue to every other key
+		help += "  " + blue.Render(m.keys.First("help")) + faint.Render(" all keys")
 	}
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
@@ -142,7 +142,7 @@ func (m *model) listTitle(fresh map[int]bool) string {
 	sep := gutter.Render("  ·  ")
 	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs)), m.prList()) + sep +
 		tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview)), review) + sep +
-		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), reviewed) + comment.Render("  "+m.keys.firsts("left", "right"))
+		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), reviewed) + comment.Render("  "+m.keys.Firsts("left", "right"))
 }
 
 // frame draws a rounded frame of w×h around lines, with the title in its top border. Focused frames are blue.
@@ -250,9 +250,9 @@ func (m *model) ownerCell(pr int) string {
 	owner := m.ownerOf(pr)
 	if owner.Name == "" {
 		if s := m.suggest(pr); s != "" {
-			return yellow.Render("?") + faint.Render(" suggest "+s+m.keys.say("owner", " (%s)", ""))
+			return yellow.Render("?") + faint.Render(" suggest "+s+m.keys.Say("owner", " (%s)", ""))
 		}
-		return yellow.Render("?") + faint.Render(" no owner"+m.keys.say("owner", " (%s)", ""))
+		return yellow.Render("?") + faint.Render(" no owner"+m.keys.Say("owner", " (%s)", ""))
 	}
 	_, explicit := m.owners[pr]
 	linked := map[bool]string{true: "", false: faint.Render(" (linked)")}[explicit]
@@ -453,7 +453,7 @@ func (m *model) eventRow(e Event, w int, fresh bool) string {
 	}
 	to := cmp.Or(e.Owner, m.ownerOf(e.PR).Name, "?")
 	keyCap := func(action string) string {
-		if k := m.keys.first(action); k != "" {
+		if k := m.keys.First(action); k != "" {
 			return keycap.Render(" " + k + " ")
 		}
 		return ""
@@ -605,7 +605,7 @@ func (m *model) help() string {
 	case m.picker != nil:
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	case m.showKeys:
-		return " " + m.keys.say("help", "%s or esc close", "esc close")
+		return " " + m.keys.Say("help", "%s or esc close", "esc close")
 	case m.themePick != nil:
 		return " ↑↓ try one  ⏎ keep it  esc put " + m.themePick.was + " back"
 	}
@@ -617,11 +617,11 @@ func (m *model) help() string {
 			parts = append(parts, label+" "+does)
 		}
 	}
-	add(m.keys.first("open"), enter)
-	add(m.keys.first("search"), "search")
+	add(m.keys.First("open"), enter)
+	add(m.keys.First("search"), "search")
 	if m.lastSearch != "" {
-		add(strings.Trim(m.keys.first("next_match")+"/"+m.keys.first("prev_match"), "/"), "next/prev")
-		add(m.keys.first("clear_search"), "clear")
+		add(strings.Trim(m.keys.First("next_match")+"/"+m.keys.First("prev_match"), "/"), "next/prev")
+		add(m.keys.First("clear_search"), "clear")
 	}
 	return " " + strings.Join(parts, "  ")
 }

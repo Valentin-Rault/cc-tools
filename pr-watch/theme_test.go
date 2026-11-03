@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Valentin-Rault/cc-tools/internal/theme"
 )
 
 // keepTheme puts the default theme back after the test: the styles are shared by every test.
 func keepTheme(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() { useTheme(themes[0].name) })
+	t.Cleanup(func() { useTheme(theme.Themes[0].Name) })
 }
 
 // Every theme has every colour, and switching restyles everything, the style tables too.
@@ -21,15 +22,15 @@ func TestThemes(t *testing.T) {
 	keepTheme(t)
 	hex := regexp.MustCompile(`^#[0-9a-f]{6}$`)
 	seen := map[string]bool{}
-	for _, th := range themes {
-		if seen[th.name] {
-			t.Errorf("two themes are called %s", th.name)
+	for _, th := range theme.Themes {
+		if seen[th.Name] {
+			t.Errorf("two themes are called %s", th.Name)
 		}
-		seen[th.name] = true
-		for i, c := range []string{th.bg, th.bgDark, th.bgHL, th.fg, th.fg2, th.dark5, th.comment, th.gutter, th.blue, th.cyan,
-			th.magenta, th.orange, th.yellow, th.green, th.red, th.gitAdd, th.gitDel, th.search} {
+		seen[th.Name] = true
+		for i, c := range []string{th.Bg, th.BgDark, th.BgHL, th.Fg, th.Fg2, th.Dark5, th.Comment, th.Gutter, th.Blue, th.Cyan,
+			th.Magenta, th.Orange, th.Yellow, th.Green, th.Red, th.GitAdd, th.GitDel, th.Search} {
 			if !hex.MatchString(c) {
-				t.Errorf("%s: colour %d is %q", th.name, i, c)
+				t.Errorf("%s: colour %d is %q", th.Name, i, c)
 			}
 		}
 	}

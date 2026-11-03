@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Valentin-Rault/cc-tools/internal/keymap"
 )
 
 const usage = `pr-watch                          open the TUI: watch your open PRs, send each event to the PR's owner session
@@ -55,7 +56,7 @@ func main() {
 		if err != nil {
 			fail(err)
 		}
-		printKeys(os.Stdout, newKeymap(cfg.Keys))
+		printKeys(os.Stdout, keymap.New(actions, cfg.Keys, true))
 	case args[0] == "plugins":
 		cfg, err := loadConfig()
 		if err != nil {

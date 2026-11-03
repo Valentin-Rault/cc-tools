@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Valentin-Rault/cc-tools/internal/keymap"
+	"github.com/Valentin-Rault/cc-tools/internal/settings"
 )
 
 // Config is read from ~/.config/pr-watch/config.json; PR_WATCH_* variables override it.
@@ -29,16 +32,11 @@ type Config struct {
 	// Theme is the colorscheme, one of themes (theme.go); t picks one and writes it here.
 	Theme string `json:"theme"`
 	// Keys binds actions to other keys than their defaults (keymap.go): {"send": "S", "queue": ""}.
-	Keys map[string]keyList `json:"keys"`
-	File string             `json:"-"` // where the config was read from
+	Keys map[string]keymap.List `json:"keys"`
+	File string                 `json:"-"` // where the config was read from
 }
 
-func configPath() string {
-	if p := os.Getenv("PR_WATCH_CONFIG"); p != "" {
-		return p
-	}
-	return filepath.Join(home(), ".config/pr-watch/config.json")
-}
+func configPath() string { return settings.Path() }
 
 func loadConfig() (Config, error) {
 	path := configPath()

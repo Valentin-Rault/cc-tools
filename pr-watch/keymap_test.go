@@ -9,35 +9,37 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Valentin-Rault/cc-tools/internal/keymap"
+	"github.com/Valentin-Rault/cc-tools/internal/theme"
 )
 
-func keysFrom(t *testing.T, config string) keymap {
+func keysFrom(t *testing.T, config string) keymap.Map {
 	t.Helper()
-	var c struct{ Keys map[string]keyList }
+	var c struct{ Keys map[string]keymap.List }
 	if err := json.Unmarshal([]byte(config), &c); err != nil {
 		t.Fatal(err)
 	}
-	return newKeymap(c.Keys)
+	return keymap.New(actions, c.Keys, true)
 }
 
 // With no "keys", every action has its defaults and nothing is said.
 func TestDefaultKeys(t *testing.T) {
-	km := newKeymap(nil)
+	km := keymap.New(actions, nil, true)
 	for _, a := range actions {
-		if !slices.Equal(km.keys[a.name], a.keys) {
-			t.Errorf("%s: %v, want %v", a.name, km.keys[a.name], a.keys)
+		if !slices.Equal(km.Keys[a.Name], a.Keys) {
+			t.Errorf("%s: %v, want %v", a.Name, km.Keys[a.Name], a.Keys)
 		}
-		for _, k := range a.keys {
-			if km.action[k] != a.name {
-				t.Errorf("%s does %q, want %s", k, km.action[k], a.name)
+		for _, k := range a.Keys {
+			if km.Action[k] != a.Name {
+				t.Errorf("%s does %q, want %s", k, km.Action[k], a.Name)
 			}
 		}
 	}
-	if len(km.notes) != 0 {
-		t.Errorf("notes: %q", km.notes)
+	if len(km.Notes) != 0 {
+		t.Errorf("notes: %q", km.Notes)
 	}
-	if km.label("left", "right") != "←→ h l" || km.label("down", "up") != "↑↓ j k" || km.label("switch_panel") != "tab" || km.label("quit") != "q" {
-		t.Errorf("labels: %q %q %q %q", km.label("left", "right"), km.label("down", "up"), km.label("switch_panel"), km.label("quit"))
+	if km.Label("left", "right") != "←→ h l" || km.Label("down", "up") != "↑↓ j k" || km.Label("switch_panel") != "tab" || km.Label("quit") != "q" {
+		t.Errorf("labels: %q %q %q %q", km.Label("left", "right"), km.Label("down", "up"), km.Label("switch_panel"), km.Label("quit"))
 	}
 }
 
@@ -49,12 +51,12 @@ func TestKeymapRules(t *testing.T) {
 	cases := map[string]string{"m": "", "S": "send", "s": "", "x": "send", "g": "go_to_owner", "G": "go_to_owner",
 		"Q": "quit", "q": "", "ctrl+c": "quit", "z": "", "e": "", "J": "down", "down": "down", "j": "", "o": "owner", "r": ""}
 	for k, want := range cases {
-		if got := km.action[k]; got != want {
+		if got := km.Action[k]; got != want {
 			t.Errorf("%s does %q, want %q", k, got, want)
 		}
 	}
-	if len(km.keys["queue"]) != 0 || km.first("queue") != "" || km.say("queue", "%s queues", "no queue key") != "no queue key" {
-		t.Errorf("queue is on: %v", km.keys["queue"])
+	if len(km.Keys["queue"]) != 0 || km.First("queue") != "" || km.Say("queue", "%s queues", "no queue key") != "no queue key" {
+		t.Errorf("queue is on: %v", km.Keys["queue"])
 	}
 	for _, want := range []string{
 		`no action "Open" (pr-watch keys lists them)`,
@@ -63,8 +65,8 @@ func TestKeymapRules(t *testing.T) {
 		"purge has no key left",
 		"ctrl+c always quits, it can't do details",
 	} {
-		if !slices.Contains(km.notes, want) {
-			t.Errorf("notes lack %q: %q", want, km.notes)
+		if !slices.Contains(km.Notes, want) {
+			t.Errorf("notes lack %q: %q", want, km.Notes)
 		}
 	}
 	var out bytes.Buffer
@@ -77,12 +79,12 @@ func TestKeymapRules(t *testing.T) {
 }
 
 func TestKeyListInTheConfig(t *testing.T) {
-	var c struct{ Keys map[string]keyList }
+	var c struct{ Keys map[string]keymap.List }
 	if err := json.Unmarshal([]byte(`{"keys": {"send": 3}}`), &c); err == nil || !strings.Contains(err.Error(), `a key is "x"`) {
 		t.Errorf("a number for a key: %v", err)
 	}
-	if normKey("Ctrl+N") != "ctrl+n" || normKey("N") != "N" || normKey("Return") != "enter" || normKey("↑") != "up" {
-		t.Errorf("normKey: %q %q %q %q", normKey("Ctrl+N"), normKey("N"), normKey("Return"), normKey("↑"))
+	if keymap.Norm("Ctrl+N") != "ctrl+n" || keymap.Norm("N") != "N" || keymap.Norm("Return") != "enter" || keymap.Norm("↑") != "up" {
+		t.Errorf("normKey: %q %q %q %q", keymap.Norm("Ctrl+N"), keymap.Norm("N"), keymap.Norm("Return"), keymap.Norm("↑"))
 	}
 }
 
@@ -135,7 +137,7 @@ func TestRemappedKeysInTheTUI(t *testing.T) {
 	keepTheme(t)
 	m.cfg.File = filepath.Join(t.TempDir(), "config.json")
 	typeIn(m, "t", "J")
-	if themeName != themes[1].name {
+	if themeName != theme.Themes[1].Name {
 		t.Errorf("J in the theme picker: %s", themeName)
 	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})

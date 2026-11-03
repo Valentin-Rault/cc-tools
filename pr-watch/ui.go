@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Valentin-Rault/cc-tools/internal/keymap"
 	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
@@ -109,7 +110,7 @@ type model struct {
 	noticed        map[string]bool // plugins already said to be new, changed or broken, as they are now
 
 	themePick *themePicker // t is open
-	keys      keymap
+	keys      keymap.Map
 	mx        mux.Mux // zellij or tmux, nil outside both
 }
 
@@ -140,15 +141,15 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 	m := &model{cfg: cfg, store: store, w: w, sender: sender, linkIdx: newLinkIndex(cfg.Repo), prs: w.snap,
 		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true,
 		leftAt: now, backAt: now, seenAt: now}
-	m.keys = newKeymap(cfg.Keys)
+	m.keys = keymap.New(actions, cfg.Keys, true)
 	m.mx = mux.Detect(cfg.TabsPlugin)
 	var notes []string
 	if cfg.Theme != "" && !useTheme(cfg.Theme) {
 		notes = append(notes, fmt.Sprintf("no theme %q in the config: %s", cfg.Theme,
-			m.keys.say("theme", "%s picks one of "+strings.Join(themeNames(), ", "), "it's one of "+strings.Join(themeNames(), ", "))))
+			m.keys.Say("theme", "%s picks one of "+strings.Join(themeNames(), ", "), "it's one of "+strings.Join(themeNames(), ", "))))
 	}
-	if len(m.keys.notes) > 0 {
-		notes = append(notes, "keys: "+strings.Join(m.keys.notes, " · "))
+	if len(m.keys.Notes) > 0 {
+		notes = append(notes, "keys: "+strings.Join(m.keys.Notes, " · "))
 	}
 	m.flash = strings.Join(notes, " · ")
 	for _, e := range store.Pending() {
@@ -364,7 +365,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.err != nil:
 			m.flash = fmt.Sprintf("#%d: %v", msg.pr, msg.err)
 		case msg.queued:
-			m.flash = fmt.Sprintf("#%d added to the merge queue", msg.pr) + m.keys.say("queue", " · %s again takes it out", "")
+			m.flash = fmt.Sprintf("#%d added to the merge queue", msg.pr) + m.keys.Say("queue", " · %s again takes it out", "")
 			m.log(msg.pr, "added to the merge queue from pr-watch")
 		default:
 			m.flash = fmt.Sprintf("#%d taken out of the merge queue", msg.pr)
@@ -394,7 +395,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.showKeys { // only closing it: quitting's key there mustn't quit
-			if k := msg.String(); k == "esc" || k == "ctrl+c" || m.keys.action[k] == "help" || m.keys.action[k] == "quit" {
+			if k := msg.String(); k == "esc" || k == "ctrl+c" || m.keys.Action[k] == "help" || m.keys.Action[k] == "quit" {
 				m.showKeys = false
 			}
 			return m, nil
@@ -426,7 +427,7 @@ func (m *model) focus(panel int) {
 
 // key does the action bound to k (keymap.go), or runs the plugin that has it.
 func (m *model) key(k string) (tea.Model, tea.Cmd) {
-	act := m.keys.action[k]
+	act := m.keys.Action[k]
 	if act != "quit" {
 		m.quitArmed = false
 	}
@@ -434,7 +435,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 	case "quit":
 		if len(m.inflight) > 0 && !m.quitArmed && k != "ctrl+c" {
 			m.quitArmed = true
-			m.flash = fmt.Sprintf("%d send(s) still running: press %s again to quit anyway", len(m.inflight), prettyKey(k))
+			m.flash = fmt.Sprintf("%d send(s) still running: press %s again to quit anyway", len(m.inflight), keymap.Pretty(k))
 			return m, nil
 		}
 		m.savePending()
@@ -473,14 +474,14 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		m.paused = !m.paused
 		m.flash = "resumed"
 		if m.paused {
-			m.flash = m.keys.say("pause", "paused: no polling until %s", "paused")
+			m.flash = m.keys.Say("pause", "paused: no polling until %s", "paused")
 		}
 		m.nextPoll = time.Now()
 	case "auto":
 		m.auto = !m.auto
 		m.flash = "auto: events go out as they come"
 		if !m.auto {
-			m.flash = m.keys.say("send", "manual: events wait for %s", "manual: events wait")
+			m.flash = m.keys.Say("send", "manual: events wait for %s", "manual: events wait")
 		}
 		return m, m.dispatch()
 	case "purge":
@@ -606,7 +607,7 @@ func (m *model) openPicker(pr int) {
 
 func (m *model) pickerKey(k string) tea.Cmd {
 	p := m.picker
-	if step := m.keys.step(k); step != 0 {
+	if step := m.keys.Step(k); step != 0 {
 		p.cursor = max(0, min(len(p.choices)-1, p.cursor+step))
 		return nil
 	}
@@ -734,7 +735,7 @@ func (m *model) dispatch() tea.Cmd {
 func (m *model) send(pr int, include func(Event) bool) tea.Cmd {
 	owner := m.ownerOf(pr)
 	if owner.Name == "" {
-		m.flash = fmt.Sprintf("#%d has no owner", pr) + m.keys.say("owner", ": press %s to pick one", "")
+		m.flash = fmt.Sprintf("#%d has no owner", pr) + m.keys.Say("owner", ": press %s to pick one", "")
 		return nil
 	}
 	if m.inflight[pr] {
@@ -1036,10 +1037,10 @@ func (m *model) toggleQueue(pr int) tea.Cmd {
 	s, mine := m.prs[strconv.Itoa(pr)]
 	switch {
 	case !mine:
-		m.flash = m.keys.say("queue", "%s queues your own PRs: select one in My PRs", "only your own PRs go in the merge queue")
+		m.flash = m.keys.Say("queue", "%s queues your own PRs: select one in My PRs", "only your own PRs go in the merge queue")
 		return nil
 	case s.NodeID == "":
-		m.flash = "pr-watch doesn't know this PR's ID yet" + m.keys.say("refresh", ": refresh with %s first", ": wait for the next refresh")
+		m.flash = "pr-watch doesn't know this PR's ID yet" + m.keys.Say("refresh", ": refresh with %s first", ": wait for the next refresh")
 		return nil
 	case m.w == nil || m.w.gh == nil:
 		return nil

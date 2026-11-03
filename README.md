@@ -38,7 +38,7 @@ make test
 It's drawn on its own background, like an editor colorscheme, so it needs a terminal with true colour. `t` picks
 the theme: tokyonight (the default), catppuccin-mocha, catppuccin-latte (light), gruvbox, nord, dracula or kanagawa.
 The screen takes on the one under the cursor as you move, `⏎` keeps it and writes it to the config file as `"theme"`,
-and `esc` puts the one you had back. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks,
+and `esc` puts the one you had back; cc-status's popup follows. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks,
 `⚠ conflicts` when it has merge conflicts, and its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
 how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
 `security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
@@ -293,6 +293,10 @@ set -g window-status-current-format '#I:#W#{?@cc_status, #{@cc_status},}'
 ```
 
 The jump's title cue shows in tmux only with `pane-border-status` on; the glow shows either way.
+
+The popup is drawn in pr-watch's theme (`"theme"` in `~/.config/pr-watch/config.json`, which pr-watch's `t` picks)
+and follows its `"keys"` for the actions it has too: `up`, `down`, `open` (jump), `refresh` and `quit`; `esc` always
+closes it, and `1`-`9` jump to that row. `cc-status list` prints in the terminal's own colours.
 
 `CC_STATUS_BADGES=0` stops it appending ●✓◐ to tab names; `CC_STATUS_TINT` and `CC_STATUS_GLOW` style the
 focus glow. pr-watch's `g` plays the same cue when it jumps to a PR's owner.

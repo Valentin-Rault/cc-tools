@@ -153,7 +153,7 @@ func (m *model) searchKey(k, text string) {
 // searchAgain is n, or N going back.
 func (m *model) searchAgain(back bool) {
 	if m.lastSearch == "" {
-		m.flash = m.keys.say("search", "no search yet: %s finds a PR by number or title", "no search yet")
+		m.flash = m.keys.Say("search", "no search yet: %s finds a PR by number or title", "no search yet")
 		return
 	}
 	ms := m.matches(m.lastSearch)

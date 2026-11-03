@@ -270,7 +270,7 @@ func TestList(t *testing.T) {
 	me := os.Getpid()
 	saveState(state{SessionID: "s1", State: needs, Kind: "permission", Detail: "Bash: make deploy", Zellij: "z", Pane: 5,
 		Since: now() - 120, Cwd: "/code/widgets", Pid: &me})
-	lines := layout(collect(), -1, 100, 0, false, false)
+	lines := layout(collect(), -1, 100, 0, ansiPainter{}, false, "")
 	const titleW = 100 - 32 - len("Other") - len("widgets") // as wide as the room left, 10 to 60
 	want := []string{
 		" Claude sessions" + strings.Repeat(" ", 100-16-10-1) + "1 need you",

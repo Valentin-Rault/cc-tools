@@ -159,7 +159,7 @@ func (m *model) pluginBindings() map[string]pluginBinding {
 	out := map[string]pluginBinding{}
 	for _, p := range m.plugins {
 		for _, k := range p.Keys {
-			if _, taken := out[k.Key]; p.Allowed && !taken && m.keys.action[k.Key] == "" {
+			if _, taken := out[k.Key]; p.Allowed && !taken && m.keys.Action[k.Key] == "" {
 				out[k.Key] = pluginBinding{p, k}
 			}
 		}
@@ -205,8 +205,8 @@ func (m *model) pluginRows() []keyRow {
 		for _, k := range p.Keys {
 			r := keyRow{k.Key, k.Does + " · " + p.Name, false}
 			switch b := bound[k.Key]; {
-			case m.keys.action[k.Key] != "":
-				r.does, r.off = r.does+": pr-watch's key for "+m.keys.action[k.Key], true
+			case m.keys.Action[k.Key] != "":
+				r.does, r.off = r.does+": pr-watch's key for "+m.keys.Action[k.Key], true
 			case b.plugin.Name != p.Name:
 				r.does, r.off = r.does+": "+b.plugin.Name+"'s key", true
 			}

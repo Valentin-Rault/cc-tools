@@ -27,7 +27,7 @@ var panelNames = map[int]string{panelMine: "My PRs", panelReview: "To review", p
 // Each row names the keys bound to its actions (keymap.go); an action that's off has no row.
 func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 	p, sel := m.panel(), m.selectedPR()
-	queue := keyRow{m.keys.label("queue"), "add your PR to the merge queue, or take it out", p != panelMine || sel == 0}
+	queue := keyRow{m.keys.Label("queue"), "add your PR to the merge queue, or take it out", p != panelMine || sel == 0}
 	if !queue.off {
 		queue.does = fmt.Sprintf("add #%d to the merge queue", sel)
 		if m.prs[strconv.Itoa(sel)].Queued {
@@ -37,10 +37,10 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 	details := map[bool]string{true: "close the details", false: "details beside the lists"}[m.expanded]
 	auto := "switch to auto: send events as they come"
 	if m.auto {
-		auto = m.keys.say("send", "switch to manual: hold events until %s", "switch to manual: hold events")
+		auto = m.keys.Say("send", "switch to manual: hold events until %s", "switch to manual: hold events")
 	}
 	pause := map[bool]string{true: "resume polling", false: "pause polling"}[m.paused]
-	k := m.keys.label
+	k := m.keys.Label
 	group := func(title string, rows ...keyRow) keyGroup {
 		return keyGroup{title, slices.DeleteFunc(rows, func(r keyRow) bool { return r.keys == "" })}
 	}

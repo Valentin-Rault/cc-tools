@@ -122,3 +122,45 @@ func TestMentions(t *testing.T) {
 		t.Error("a PR named only in command output counted")
 	}
 }
+
+// Claude Code keeps copies of a command: the input it ran rewritten beside it (wireToolInputs), and the whole request
+// again in an api-request-blob line. One look at someone else's PR mustn't add up to the three mentions that make a
+// session its reviewer and move it to the Reviewing tab.
+func TestMentionsCountEachCommandOnce(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	project := filepath.Join(dir, "projects", "-code-widgets")
+	os.MkdirAll(project, 0o755)
+	write := func(session string, lines ...string) {
+		os.WriteFile(filepath.Join(project, session+".jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	}
+	write("glance",
+		`{"type":"user","cwd":"/code/widgets","message":{"role":"user","content":"which PR declared the packages proprietary?"}}`,
+		`{"parentUuid":"a","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"gh pr view 12 --json state"}}]},"wireToolInputs":{"toolu_1":{"command":"cd /code/widgets && gh pr view 12 --json state"}},"type":"assistant","uuid":"u1"}`,
+		`{"type":"api-request-blob","sessionId":"glance","hash":"h1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"s"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"cd /code/widgets && gh pr view 12 --json state"}}]}}`,
+	)
+	write("rev",
+		`{"type":"user","cwd":"/code/widgets","message":{"role":"user","content":[{"type":"text","text":"review https://github.com/acme/widgets/pull/12"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"gh pr view 12 && gh pr diff 12"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"gh pr checks 12"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"https://github.com/acme/widgets/pull/12/checks"}]}}`,
+	)
+	_, mentions := newLinkIndex("acme/widgets").update()
+	counts := map[string]int{}
+	for _, m := range mentions[12] {
+		counts[m.SessionID] = m.Count
+	}
+	if counts["glance"] != 1 {
+		t.Errorf("one command counted %d times, want 1", counts["glance"])
+	}
+	if counts["rev"] != 3 {
+		t.Errorf("a prompt and two commands, one naming #12 twice, counted %d times, want 3", counts["rev"])
+	}
+	if r, ok := clearReviewer(mentions, 12); !ok || r.SessionID != "rev" {
+		t.Errorf("reviewer of #12 = %+v, %v; want rev", r, ok)
+	}
+	only := map[int][]mention{12: {{SessionID: "glance", Count: counts["glance"]}}}
+	if r, ok := clearReviewer(only, 12); ok {
+		t.Errorf("one look made %s the reviewer", r.SessionID)
+	}
+}

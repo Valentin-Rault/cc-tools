@@ -72,27 +72,57 @@ func (x *linkIndex) update() (map[int]prLink, map[int][]mention) {
 }
 
 var (
-	toolUse    = []byte(`"tool_use"`)
-	toolResult = []byte(`"tool_result"`)
-	userLine   = []byte(`"type":"user"`)
-	pull       = []byte("/pull")
-	ghPR       = []byte("gh pr ")
+	toolUse  = []byte(`"tool_use"`)
+	userLine = []byte(`"type":"user"`)
+	pull     = []byte("/pull")
+	ghPR     = []byte("gh pr ")
 )
 
-// countMentions counts the PRs a line names, if it's a command the session ran or a prompt you typed. Tool output
-// doesn't count: a PR list names every PR.
+// countMentions counts the PRs a line names, if it's a command the session ran or a prompt you typed, each PR once a
+// line. Tool output doesn't count: a PR list names every PR. Nor do the copies Claude Code keeps of a command, beside
+// its input (wireToolInputs) and in api-request-blob lines: one command must count once, not three times.
 func (x *linkIndex) countMentions(path string, line []byte) {
 	if !bytes.Contains(line, pull) && !bytes.Contains(line, ghPR) {
-		return // most lines name no PR; skip the regexp for them
+		return // most lines name no PR; skip the JSON for them
 	}
-	if !bytes.Contains(line, toolUse) && !(bytes.Contains(line, userLine) && !bytes.Contains(line, toolResult)) {
+	if !bytes.Contains(line, toolUse) && !bytes.Contains(line, userLine) {
 		return
 	}
-	for _, m := range x.named.FindAllSubmatch(line, -1) {
-		pr, err := strconv.Atoi(string(m[1]))
-		if err != nil {
-			continue
+	var l struct {
+		Type    string
+		Message struct{ Content json.RawMessage }
+	}
+	if json.Unmarshal(line, &l) != nil {
+		return
+	}
+	var said [][]byte
+	var prompt string
+	var blocks []struct {
+		Type, Text string
+		Input      json.RawMessage
+	}
+	switch {
+	case l.Type == "user" && json.Unmarshal(l.Message.Content, &prompt) == nil:
+		said = append(said, []byte(prompt))
+	case (l.Type == "user" || l.Type == "assistant") && json.Unmarshal(l.Message.Content, &blocks) == nil:
+		for _, b := range blocks {
+			switch {
+			case l.Type == "user" && b.Type == "text":
+				said = append(said, []byte(b.Text))
+			case l.Type == "assistant" && b.Type == "tool_use":
+				said = append(said, b.Input)
+			}
 		}
+	}
+	named := map[int]bool{}
+	for _, s := range said {
+		for _, m := range x.named.FindAllSubmatch(s, -1) {
+			if pr, err := strconv.Atoi(string(m[1])); err == nil {
+				named[pr] = true
+			}
+		}
+	}
+	for pr := range named {
 		if x.mentions[pr] == nil {
 			x.mentions[pr] = map[string]int{}
 		}

@@ -1,6 +1,6 @@
 # cc-tools
 
-Small tools for running many [Claude Code](https://claude.com/claude-code) sessions side by side in zellij.
+Small tools for running many [Claude Code](https://claude.com/claude-code) sessions side by side.
 
 | tool | what it does |
 |---|---|
@@ -8,8 +8,10 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 | [`cc-status`](#cc-status) | Shows which Claude sessions in your zellij panes need you, and jumps to them. |
 | [`hooks/pr-guard.sh`](#pr-guard) | A Claude Code hook that keeps merging your call: Claude can't merge, enqueue or enable auto-merge. |
 
-macOS, zellij 0.45+, Claude Code, `gh` (logged in), `git`, `jq`. Go 1.24+ to build pr-watch, and Rust with the
-`wasm32-wasip1` target for its zellij plugin; cc-status needs only Python 3.
+macOS, Claude Code, `gh` (logged in), `git`, `jq`, and Go 1.24+ to build pr-watch. pr-watch runs in any terminal;
+a few of its features need zellij 0.45+ or tmux 3.0+ ([which](#in-zellij-tmux-or-neither)), and in zellij, Rust with
+the `wasm32-wasip1` target to build its plugin (`make install` skips it without `cargo`). cc-status needs zellij and
+Python 3.
 
 ```sh
 make install   # builds pr-watch into ~/.claude/pr-watch/ and links it and cc-status into ~/.local/bin, pr-guard into ~/.claude/hooks
@@ -55,15 +57,15 @@ its author's login. The cursor goes to the first match below it as you type, swi
 another; `⏎` keeps the search, `esc` goes back. `n` and `N` then go to the next and previous match, round all three
 lists, and the matches' numbers stay highlighted until `esc`.
 
-Keep it open in a zellij tab while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
+Keep it open in a terminal tab, a zellij tab or a tmux window while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
 the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the
 list and the events, and `⏎` opens the selected PR in the browser.
 
 **What's new.** Coming back to pr-watch's pane, what happened while you were away is marked ✦: on its line in the
 events, before its PR, as a count on each list and in the status line, above a line saying since when. The marks
-go once you leave the pane again. zellij tells pr-watch when you move to another pane or another app; when you
-switch tabs, only once you're back, so then what's new is what arrived since you last pressed a key in pr-watch or
-came back to it.
+go once you leave the pane again. The terminal tells pr-watch when you move to another app, zellij and tmux when you
+move to another pane (tmux with `set -g focus-events on`). zellij says you switched tabs only once you're back, so
+then what's new is what arrived since you last pressed a key in pr-watch or came back to it.
 
 **Who owns a PR.** Claude Code records in a session's transcript which PR the session's branch belongs to
 (`"type":"pr-link"` lines; `claude --from-pr` uses them too). pr-watch reads those, so a PR's events go to the running
@@ -86,7 +88,8 @@ session is on), so pr-watch counts which session named the PR in its commands an
 confirming once routes all the PR's events there.
 
 The `o` picker lists the running sessions (the linked one, or the one with the PR's branch checked out, is
-preselected) and two ways to start one in a new zellij tab, with the PR's waiting events as its opening prompt:
+preselected) and, in zellij or tmux, two ways to start one in a new tab, with the PR's waiting events as its opening
+prompt:
 
 - **resume the session that worked on it**: `claude --resume <its id>` in the folder it ran in, when it isn't running.
 - **new Claude session**: `claude --session-id <new id> -n pr-<n>` in the worktree that has the PR's branch checked
@@ -151,10 +154,25 @@ review some PRs need (optional). `theme` is what `t` last picked. State lives in
 - **Everywhere:** the `?` popup, the key help, the hints and the messages name the keys you bound.
 - **Plugins** can have any key no action has, so a remap can free one for them.
 
+### In zellij, tmux or neither
+
+pr-watch works in any terminal: the lists, the events and their delivery (that goes through Claude Code, wherever
+the sessions run), search, themes, keys and plugins. Three features need it to run in zellij or tmux, and say so
+outside them:
+
+- `g`, going to the owner's pane;
+- the `o` picker's two ways to start a session in a new tab;
+- tabs by stage (`arrange_tabs`), below.
+
+pr-watch tells which it runs in from its environment; with both set (one started inside the other), it takes the
+one whose pane it runs in. In tmux a tab is a window. pr-watch finds a session's pane through its processes: tmux
+knows the process it started in each pane, and the session runs there or below it. It looks in its own tmux server
+only, so sessions in another server are left alone. In zellij it reads the pane from the session's environment.
+
 ### Tabs by stage
 
-With `"arrange_tabs": true` in the config, pr-watch keeps each Claude session that works in the repo in the zellij
-tab of its stage, creating the tabs as needed:
+With `"arrange_tabs": true` in the config, pr-watch keeps each Claude session that works in the repo in the tab of
+its stage (a tmux window in tmux), creating the tabs as needed:
 
 | tab | sessions |
 |---|---|
@@ -180,8 +198,9 @@ instructions say a worktree holds, like a local stack, is stopped first, then `g
 session then says what it removed and what's left. A session that was already in the Done tab gets none, and none
 gets two for the same PRs.
 
-zellij's command line can't move a pane to another tab, so a small plugin does (`zellij-tabs/`, Rust built for
-`wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
+tmux moves a pane to another window itself (`join-pane`, `break-pane`); a pane alone in its window takes the window
+along, renamed. zellij's command line can't move a pane to another tab, so there a small plugin does
+(`zellij-tabs/`, Rust built for `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
 `zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`. In zellij 0.45.1 the plugin API
 can't move a pane into most existing tabs either, so pr-watch opens a placeholder pane in the tab, without focus, and
 the plugin swaps the session's pane in for it.

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
 var errOwnerGone = errors.New("the owner session isn't running")
@@ -109,7 +110,7 @@ type model struct {
 
 	themePick *themePicker // t is open
 	keys      keymap
-	mux       mux // zellij or tmux, nil outside both
+	mx        mux.Mux // zellij or tmux, nil outside both
 }
 
 type choiceKind int
@@ -140,7 +141,7 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true,
 		leftAt: now, backAt: now, seenAt: now}
 	m.keys = newKeymap(cfg.Keys)
-	m.mux = detectMux(cfg.TabsPlugin)
+	m.mx = mux.Detect(cfg.TabsPlugin)
 	var notes []string
 	if cfg.Theme != "" && !useTheme(cfg.Theme) {
 		notes = append(notes, fmt.Sprintf("no theme %q in the config: %s", cfg.Theme,
@@ -199,7 +200,7 @@ func (m *model) arrangeTabs() tea.Cmd {
 	if m.tabTries == nil {
 		m.tabTries = map[string]int{}
 	}
-	sessions, store, cfg, tries, mx := m.sessions, m.store, m.cfg, m.tabTries, m.mux // only this goroutine touches tries till it's done
+	sessions, store, cfg, tries, mx := m.sessions, m.store, m.cfg, m.tabTries, m.mx // only this goroutine touches tries till it's done
 	var gh GitHub
 	if m.w != nil {
 		gh = m.w.gh
@@ -207,11 +208,7 @@ func (m *model) arrangeTabs() tea.Cmd {
 	return func() tea.Msg {
 		v.repoDirs, v.closed = repoDirs(cfg.RepoDir), store.Closed()
 		placed := store.TabsPlaced()
-		spots := map[string]paneSpot{}
-		if mx != nil {
-			spots = mx.Locate(sessions)
-		}
-		moves := v.plan(sessions, spots, placed, tries)
+		moves := v.plan(sessions, locate(mx, sessions), placed, tries)
 		done := settleFarewells(v.lastMessages(moves, placed, store.Farewells()), gh, cfg.Repo, cfg.RepoDir, v, sessions)
 		asked, arrived, err := arrange(store, mx, moves, tries)
 		return tabsMsg{asked, arrived, done, err}
@@ -527,7 +524,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 
 // jump goes to the session's pane (g).
 func (m *model) jump(s Session) tea.Cmd {
-	mx := m.mux
+	mx := m.mx
 	return func() tea.Msg {
 		if mx == nil {
 			return jumpMsg{errors.New("going to a pane " + needsMux)}
@@ -594,7 +591,7 @@ func (m *model) openPicker(pr int) {
 		}
 		p.choices = append(p.choices, choice{kind: chooseSession, session: x, label: x.Name, note: note})
 	}
-	if m.mux == nil {
+	if m.mx == nil {
 		for i := range p.choices {
 			if p.choices[i].kind != chooseSession {
 				p.choices[i].note = needsMux
@@ -641,7 +638,7 @@ func (m *model) pickerKey(k string) tea.Cmd {
 // the session's opening prompt. The PR is claimed for the new session's ID before it starts, so its own claim (or a
 // send from dispatch) can't race the prompt.
 func (m *model) handOver(pr int, c choice) tea.Cmd {
-	if m.mux == nil {
+	if m.mx == nil {
 		m.flash = "opening a tab " + needsMux
 		return nil
 	}
@@ -682,7 +679,7 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 		}
 	}
 	m.flash = fmt.Sprintf("#%d: opening a session in the %s tab", pr, title)
-	mx := m.mux
+	mx := m.mx
 	openTab := func(dir string, args ...string) error {
 		argv, err := claudeArgv(args...)
 		if err != nil {

@@ -1,4 +1,4 @@
-package main
+package mux
 
 import (
 	"cmp"
@@ -15,7 +15,7 @@ import (
 )
 
 // zellij. Its command line can't move a pane to another tab, so a small plugin does (zellij-tabs/, built to
-// pr-watch-tabs.wasm), asked through `zellij pipe`. where is a zellij session's name.
+// pr-watch-tabs.wasm), asked through `zellij pipe`. Where is a zellij session's name.
 type zellijMux struct {
 	here   string // the zellij session pr-watch runs in
 	plugin string // pr-watch-tabs.wasm
@@ -101,15 +101,15 @@ func (z zellijMux) OpenTab(title, dir string, argv []string) error {
 }
 
 // Locate: a pane is looked at when a zellij client has it focused.
-func (z zellijMux) Locate(sessions []Session) map[string]paneSpot {
-	spots := map[string]paneSpot{}
+func (z zellijMux) Locate(pids []int) map[int]Spot {
+	spots := map[int]Spot{}
 	type layout struct {
 		tabOf   map[string]string
 		focused map[string]bool
 	}
 	layouts := map[string]*layout{}
-	for _, s := range sessions {
-		zs, pane, ok := z.Pane(s.Pid)
+	for _, pid := range pids {
+		zs, pane, ok := z.Pane(pid)
 		if !ok {
 			continue
 		}
@@ -138,7 +138,7 @@ func (z zellijMux) Locate(sessions []Session) map[string]paneSpot {
 			}
 		}
 		if tab, ok := l.tabOf[pane]; ok {
-			spots[s.SessionID] = paneSpot{where: zs, pane: pane, tab: tab, focused: l.focused[pane]}
+			spots[pid] = Spot{Where: zs, Pane: pane, Tab: tab, Focused: l.focused[pane]}
 		}
 	}
 	return spots
@@ -148,19 +148,19 @@ func (z zellijMux) Locate(sessions []Session) map[string]paneSpot {
 // the plugin the first time. zellij 0.45.1 can't move a pane into most existing tabs, so for a tab that exists
 // pr-watch opens a placeholder pane in it, without focus, and the plugin replaces it with the pane; "-" sends the pane
 // to a new tab. A placeholder the plugin doesn't use closes by itself.
-func (z zellijMux) MoveToTabs(moves []tabMove) error {
+func (z zellijMux) MoveToTabs(moves []Move) error {
 	if len(moves) == 0 {
 		return nil
 	}
 	if _, err := os.Stat(z.plugin); err != nil {
 		return fmt.Errorf("the tabs plugin isn't installed (%s): run make install", z.plugin)
 	}
-	zellijSession := moves[0].spot.where
+	zellijSession := moves[0].Spot.Where
 	ids := tabIDs(zellijSession)
 	var lines []string
 	for _, m := range moves {
 		placeholder := "-"
-		if id, ok := ids[m.Stage]; ok {
+		if id, ok := ids[m.Tab]; ok {
 			out, err := zellij(zellijSession, "new-pane", "--tab-id", strconv.Itoa(id), "--no-focus", "--close-on-exit",
 				"--name", "pr-watch is moving a session here", "--", "sleep", "20")
 			if err != nil {
@@ -168,7 +168,7 @@ func (z zellijMux) MoveToTabs(moves []tabMove) error {
 			}
 			placeholder = strings.TrimPrefix(strings.TrimSpace(out), "terminal_")
 		}
-		lines = append(lines, m.spot.pane+" "+placeholder+" "+m.Stage)
+		lines = append(lines, m.Spot.Pane+" "+placeholder+" "+m.Tab)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -195,8 +195,8 @@ func tabIDs(zellijSession string) map[string]int {
 	ids := map[string]int{}
 	if out, err := zellij(zellijSession, "list-tabs", "--json"); err == nil && json.Unmarshal([]byte(out), &tabs) == nil {
 		for _, t := range tabs {
-			if _, ok := ids[tabBase(t.Name)]; !ok {
-				ids[tabBase(t.Name)] = t.TabID
+			if _, ok := ids[TabBase(t.Name)]; !ok {
+				ids[TabBase(t.Name)] = t.TabID
 			}
 		}
 	}

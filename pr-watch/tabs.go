@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
 // Tabs by stage: pr-watch keeps each Claude session that works in the repo in the tab of its stage, a zellij tab or a
@@ -20,11 +21,6 @@ const (
 
 // stageOrder is the order the tabs are created in, so they line up as WIP, In review, Reviewing, Done.
 var stageOrder = []string{stageWIP, stageReview, stageReviewing, stageDone}
-
-// tabBadge is what cc-status appends to tab names (●✓◐): a tab is known by its name without it.
-var tabBadge = regexp.MustCompile(` [●✓◐]+$`)
-
-func tabBase(name string) string { return tabBadge.ReplaceAllString(name, "") }
 
 // tabView is what pr-watch knows about the PRs, enough to tell each session's stage.
 type tabView struct {
@@ -137,18 +133,12 @@ func sameSession(o Owner, s Session) bool {
 	return o.Name == s.Name
 }
 
-// paneSpot is where a session's pane is now.
-type paneSpot struct {
-	where, pane, tab string // where: the zellij session or tmux server
-	focused          bool   // someone is looking at it: moving it would yank their view
-}
-
 // tabMove is the plan for one session.
 type tabMove struct {
 	Session Session
 	Stage   string
-	spot    paneSpot
-	Act     string // "move", "there" (in its tab), "stay" (placed before), "wait" (you're in it), "stuck", "skip"
+	spot    mux.Spot // where its pane is now; Focused: moving it would yank someone's view
+	Act     string   // "move", "there" (in its tab), "stay" (placed before), "wait" (you're in it), "stuck", "skip"
 	Why     string
 }
 
@@ -159,7 +149,7 @@ const maxTries = 3
 // moves only when its stage changes, so a pane you moved by hand stays there until then. A WIP session moves only back
 // from In review, its PR in draft again: you can start one in any tab. tries counts the rounds a move was asked for
 // and hasn't happened.
-func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[string]string, tries map[string]int) []tabMove {
+func (v tabView) plan(sessions []Session, spots map[string]mux.Spot, placed map[string]string, tries map[string]int) []tabMove {
 	var moves []tabMove
 	for _, s := range sessions {
 		st := v.stage(s)
@@ -170,13 +160,13 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 			m.Act, m.Why = "skip", "doesn't work in the repo"
 		case !inZellij:
 			m.Act, m.Why = "skip", "not in a pane of the multiplexer pr-watch runs in"
-		case tabBase(spot.tab) == st:
+		case mux.TabBase(spot.Tab) == st:
 			m.Act, m.Why = "there", "in its tab"
 		case st == stageWIP && placed[s.SessionID] != stageReview:
 			m.Act, m.Why = "skip", "WIP stays in the tab you started it in"
 		case placed[s.SessionID] == st:
 			m.Act, m.Why = "stay", "placed before; moves again when its stage changes"
-		case spot.focused:
+		case spot.Focused:
 			m.Act, m.Why = "wait", "you're in it: moves once you leave it"
 		case tries[s.SessionID] >= maxTries:
 			m.Act, m.Why = "stuck", fmt.Sprintf("asked %d times, it didn't move", maxTries)
@@ -191,7 +181,7 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 // arrange asks the multiplexer for the moves and records the sessions seen in their tab. A move counts once
 // pr-watch sees the pane in its tab, on a later round: zellij's plugin moves panes one at a time, after answering.
 // Without a multiplexer nothing moves.
-func arrange(store Store, mx mux, moves []tabMove, tries map[string]int) (asked, arrived []tabMove, err error) {
+func arrange(store Store, mx mux.Mux, moves []tabMove, tries map[string]int) (asked, arrived []tabMove, err error) {
 	placed := store.TabsPlaced()
 	moves = slices.Clone(moves) // in stage order, so new tabs are created in that order too
 	slices.SortStableFunc(moves, func(a, b tabMove) int { return slices.Index(stageOrder, a.Stage) - slices.Index(stageOrder, b.Stage) })
@@ -206,17 +196,21 @@ func arrange(store Store, mx mux, moves []tabMove, tries map[string]int) (asked,
 			placed[m.Session.SessionID] = m.Stage
 			delete(tries, m.Session.SessionID)
 		case "move":
-			if _, ok := byWhere[m.spot.where]; !ok {
-				wheres = append(wheres, m.spot.where)
+			if _, ok := byWhere[m.spot.Where]; !ok {
+				wheres = append(wheres, m.spot.Where)
 			}
-			byWhere[m.spot.where] = append(byWhere[m.spot.where], m)
+			byWhere[m.spot.Where] = append(byWhere[m.spot.Where], m)
 		}
 	}
 	for _, w := range wheres {
 		if mx == nil {
 			break
 		}
-		if err = mx.MoveToTabs(byWhere[w]); err != nil {
+		var ms []mux.Move
+		for _, m := range byWhere[w] {
+			ms = append(ms, mux.Move{Spot: m.spot, Tab: m.Stage})
+		}
+		if err = mx.MoveToTabs(ms); err != nil {
 			break
 		}
 		for _, m := range byWhere[w] {
@@ -281,11 +275,7 @@ func printTabsPlan(store Store) error {
 	}
 	sessions = withBranches(sessions)
 	placed := store.TabsPlaced()
-	spots := map[string]paneSpot{}
-	if mx := detectMux(cfg.TabsPlugin); mx != nil {
-		spots = mx.Locate(sessions)
-	}
-	moves := v.plan(sessions, spots, placed, nil)
+	moves := v.plan(sessions, locate(mux.Detect(cfg.TabsPlugin), sessions), placed, nil)
 	last := map[string]bool{}
 	for _, f := range v.lastMessages(moves, placed, store.Farewells()) {
 		last[f.Session.SessionID] = true
@@ -297,7 +287,7 @@ func printTabsPlan(store Store) error {
 		if last[m.Session.SessionID] {
 			what += "; gets its last message, to clean up"
 		}
-		fmt.Printf("%-24s %-10s %-22s %s\n", m.Session.Name, m.Stage, m.spot.tab, what)
+		fmt.Printf("%-24s %-10s %-22s %s\n", m.Session.Name, m.Stage, m.spot.Tab, what)
 	}
 	if !cfg.ArrangeTabs {
 		fmt.Printf("\nNothing moves until \"arrange_tabs\": true is in %s.\n", configPath())

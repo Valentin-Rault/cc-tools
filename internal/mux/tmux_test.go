@@ -1,4 +1,4 @@
-package main
+package mux
 
 import (
 	"os"
@@ -52,10 +52,10 @@ func windowOf(t *testing.T, socket, pane string) string {
 	return out
 }
 
-// pr-watch finds the panes the sessions run in, moves them to the window of their stage, and opens new ones.
+// tmux finds the panes processes run in, moves them to another window, opens new ones and jumps to one.
 func TestTmux(t *testing.T) {
 	where, panes, pids := tmuxServer(t)
-	tm := tmuxMux{socket: where, pane: panes["a"]} // pr-watch runs in a
+	tm := tmuxMux{socket: where, pane: panes["a"]} // the caller runs in a
 	if _, pane, ok := tm.Pane(pids["a"]); !ok || pane != panes["a"] {
 		t.Fatalf("pane of a: %q %v", pane, ok)
 	}
@@ -80,21 +80,20 @@ func TestTmux(t *testing.T) {
 		t.Errorf("a session started from the pane's shell (pid %d): %q %v", child, pane, ok)
 	}
 
-	sessions := []Session{{SessionID: "b", Pid: pids["b"]}, {SessionID: "c", Pid: pids["c"]}, {SessionID: "out", Pid: os.Getpid()}}
-	spots := tm.Locate(sessions)
-	if spots["b"] != (paneSpot{where: where, pane: panes["b"], tab: "main"}) || spots["c"].tab != "WIP" || len(spots) != 2 {
+	spots := tm.Locate([]int{pids["b"], pids["c"], os.Getpid()})
+	if spots[pids["b"]] != (Spot{Where: where, Pane: panes["b"], Tab: "main"}) || spots[pids["c"]].Tab != "WIP" || len(spots) != 2 {
 		t.Errorf("located %+v", spots)
 	}
 
 	// b goes to WIP, which exists; c to In review, which doesn't: its window goes along, renamed
-	err = tm.MoveToTabs([]tabMove{{Stage: stageWIP, spot: spots["b"]}, {Stage: stageReview, spot: spots["c"]}})
+	err = tm.MoveToTabs([]Move{{Tab: "WIP", Spot: spots[pids["b"]]}, {Tab: "In review", Spot: spots[pids["c"]]}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := windowOf(t, where, panes["b"]); w != stageWIP {
+	if w := windowOf(t, where, panes["b"]); w != "WIP" {
 		t.Errorf("b is in %q", w)
 	}
-	if w := windowOf(t, where, panes["c"]); w != stageReview {
+	if w := windowOf(t, where, panes["c"]); w != "In review" {
 		t.Errorf("c is in %q", w)
 	}
 	if w := windowOf(t, where, panes["a"]); w != "main" {
@@ -106,10 +105,10 @@ func TestTmux(t *testing.T) {
 	dir, _ := filepath.EvalSymlinks(t.TempDir())
 	out := filepath.Join(dir, "got")
 	nasty := "$(touch pwned); `id` 'quoted' \"too\""
-	if err := tm.OpenTab(stageDone, dir, []string{"/bin/sh", "-c", `printf %s "$1" > got; exec sleep 600`, "sh", nasty}); err != nil {
+	if err := tm.OpenTab("Done", dir, []string{"/bin/sh", "-c", `printf %s "$1" > got; exec sleep 600`, "sh", nasty}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tm.OpenTab(stageWIP, dir, []string{"sleep", "600"}); err != nil {
+	if err := tm.OpenTab("WIP", dir, []string{"sleep", "600"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(300 * time.Millisecond)
@@ -120,7 +119,7 @@ func TestTmux(t *testing.T) {
 		t.Error("a shell ran the argument")
 	}
 	listing, _ := tmux(where, "list-panes", "-a", "-F", "#{window_name} #{pane_current_path}")
-	if strings.Count(listing, stageWIP+" ") != 2 || !strings.Contains(listing, stageDone+" "+dir) {
+	if strings.Count(listing, "WIP ") != 2 || !strings.Contains(listing, "Done "+dir) {
 		t.Errorf("panes:\n%s", listing)
 	}
 
@@ -136,32 +135,32 @@ func TestTmux(t *testing.T) {
 	}
 }
 
-// detectMux knows tmux from $TMUX, zellij from $ZELLIJ_SESSION_NAME, and neither outside both.
-func TestDetectMux(t *testing.T) {
+// Detect knows tmux from $TMUX, zellij from $ZELLIJ_SESSION_NAME, and neither outside both.
+func TestDetect(t *testing.T) {
 	t.Setenv("ZELLIJ_SESSION_NAME", "")
 	t.Setenv("TMUX", "/tmp/tmux-501/default,123,0")
 	t.Setenv("TMUX_PANE", "%4")
-	if m, ok := detectMux("").(tmuxMux); !ok || m.socket != "/tmp/tmux-501/default" || m.pane != "%4" {
-		t.Errorf("tmux: %#v", detectMux(""))
+	if m, ok := Detect("").(tmuxMux); !ok || m.socket != "/tmp/tmux-501/default" || m.pane != "%4" {
+		t.Errorf("tmux: %#v", Detect(""))
 	}
 	// both set: the one pr-watch's process runs below
 	t.Setenv("ZELLIJ_SESSION_NAME", "z")
 	was := inTmuxPane
 	t.Cleanup(func() { inTmuxPane = was })
 	inTmuxPane = func(tmuxMux) bool { return true }
-	if _, ok := detectMux("").(tmuxMux); !ok {
-		t.Errorf("tmux started in a zellij pane: %#v", detectMux(""))
+	if _, ok := Detect("").(tmuxMux); !ok {
+		t.Errorf("tmux started in a zellij pane: %#v", Detect(""))
 	}
 	inTmuxPane = func(tmuxMux) bool { return false }
-	if m, ok := detectMux("p.wasm").(zellijMux); !ok || m.here != "z" || m.plugin != "p.wasm" {
-		t.Errorf("zellij started in a tmux pane: %#v", detectMux("p.wasm"))
+	if m, ok := Detect("p.wasm").(zellijMux); !ok || m.here != "z" || m.plugin != "p.wasm" {
+		t.Errorf("zellij started in a tmux pane: %#v", Detect("p.wasm"))
 	}
 	t.Setenv("TMUX", "")
-	if _, ok := detectMux("").(zellijMux); !ok {
-		t.Errorf("zellij: %#v", detectMux(""))
+	if _, ok := Detect("").(zellijMux); !ok {
+		t.Errorf("zellij: %#v", Detect(""))
 	}
 	t.Setenv("ZELLIJ_SESSION_NAME", "")
-	if m := detectMux(""); m != nil {
+	if m := Detect(""); m != nil {
 		t.Errorf("neither: %#v", m)
 	}
 }

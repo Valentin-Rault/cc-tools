@@ -1,4 +1,4 @@
-package main
+package mux
 
 import (
 	"cmp"
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// tmux. A zellij tab is a tmux window; where is a tmux server's socket, and stage windows live in the tmux session of
+// tmux. A zellij tab is a tmux window; Where is a tmux server's socket, and stage windows live in the tmux session of
 // the pane they take. tmux moves a pane into another window itself (join-pane, break-pane), so it needs no plugin.
 // Commands with arguments go to tmux as arguments and tmux runs them without a shell, so a prompt can't become one.
 type tmuxMux struct {
@@ -24,18 +24,18 @@ func (tmuxMux) Name() string { return "tmux" }
 // pr-watch's own tmux server is asked.
 func (t tmuxMux) Pane(pid int) (where, pane string, ok bool) {
 	spot, ok := ancestorPane(pid, t.panes(), processParents())
-	return t.socket, spot.pane, ok
+	return t.socket, spot.Pane, ok
 }
 
 // panes is every pane of the server, by the process tmux started in it.
-func (t tmuxMux) panes() map[int]paneSpot {
+func (t tmuxMux) panes() map[int]Spot {
 	out, _ := tmux(t.socket, "list-panes", "-a", "-F",
 		"#{pane_pid}\t#{pane_id}\t#{pane_active}#{window_active}#{?session_attached,1,0}\t#{window_name}")
-	panes := map[int]paneSpot{}
+	panes := map[int]Spot{}
 	for _, line := range strings.Split(out, "\n") {
 		if f := strings.SplitN(line, "\t", 4); len(f) == 4 {
 			if pid, err := strconv.Atoi(f[0]); err == nil {
-				panes[pid] = paneSpot{where: t.socket, pane: f[1], tab: f[3], focused: f[2] == "111"}
+				panes[pid] = Spot{Where: t.socket, Pane: f[1], Tab: f[3], Focused: f[2] == "111"}
 			}
 		}
 	}
@@ -43,13 +43,13 @@ func (t tmuxMux) panes() map[int]paneSpot {
 }
 
 // ancestorPane is the pane whose process is pid or one of its ancestors.
-func ancestorPane(pid int, panes map[int]paneSpot, parent map[int]int) (paneSpot, bool) {
+func ancestorPane(pid int, panes map[int]Spot, parent map[int]int) (Spot, bool) {
 	for p, hops := pid, 0; p > 1 && hops < 64; p, hops = parent[p], hops+1 {
 		if spot, ok := panes[p]; ok {
 			return spot, true
 		}
 	}
-	return paneSpot{}, false
+	return Spot{}, false
 }
 
 // processParents maps every process to its parent.
@@ -109,30 +109,30 @@ func (t tmuxMux) OpenTab(title, dir string, argv []string) error {
 }
 
 // Locate: a pane is looked at when it's the active pane of the current window of a session a client shows.
-func (t tmuxMux) Locate(sessions []Session) map[string]paneSpot {
-	spots := map[string]paneSpot{}
+func (t tmuxMux) Locate(pids []int) map[int]Spot {
+	spots := map[int]Spot{}
 	panes, parent := t.panes(), processParents()
-	for _, s := range sessions {
-		if spot, ok := ancestorPane(s.Pid, panes, parent); ok {
-			spots[s.SessionID] = spot
+	for _, pid := range pids {
+		if spot, ok := ancestorPane(pid, panes, parent); ok {
+			spots[pid] = spot
 		}
 	}
 	return spots
 }
 
-// MoveToTabs joins each pane to the window of its stage in its session (join-pane), or makes it a window of that
+// MoveToTabs joins each pane to the window of its tab in its session (join-pane), or makes it a window of that
 // name (break-pane), without switching to it. A pane alone in its window takes the window along, renamed.
-func (t tmuxMux) MoveToTabs(moves []tabMove) error {
+func (t tmuxMux) MoveToTabs(moves []Move) error {
 	for _, m := range moves {
-		socket, pane := m.spot.where, m.spot.pane
+		socket, pane := m.Spot.Where, m.Spot.Pane
 		session, err := tmux(socket, "display-message", "-p", "-t", pane, "#{session_id}")
 		if err != nil {
 			return err
 		}
-		if win, ok := tmuxWindows(socket, session)[m.Stage]; ok {
+		if win, ok := tmuxWindows(socket, session)[m.Tab]; ok {
 			err = tmuxSplit(socket, win, []string{"join-pane", "-d", "-s", pane, "-t", win})
 		} else {
-			_, err = tmux(socket, "break-pane", "-d", "-s", pane, "-n", m.Stage)
+			_, err = tmux(socket, "break-pane", "-d", "-s", pane, "-n", m.Tab)
 		}
 		if err != nil {
 			return err
@@ -160,8 +160,8 @@ func tmuxWindows(socket, session string) map[string]string {
 	out, _ := tmux(socket, "list-windows", "-t", session, "-F", "#{window_id}\t#{window_name}")
 	for _, line := range strings.Split(out, "\n") {
 		if id, name, ok := strings.Cut(line, "\t"); ok {
-			if _, seen := ids[tabBase(name)]; !seen {
-				ids[tabBase(name)] = id
+			if _, seen := ids[TabBase(name)]; !seen {
+				ids[TabBase(name)] = id
 			}
 		}
 	}

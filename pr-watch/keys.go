@@ -116,21 +116,7 @@ func (m *model) overlayKeys(lines []string, w int) []string {
 		bw = min(w-4, colW+2)
 		inner = stack(move, find, pr, watch)
 	}
-	title := accent.Render("Keys")
-	if anyOff(move, find, pr, watch) {
-		title += faint.Render("  ·  in " + panelNames[m.panel()] + "; dimmed ones do nothing now")
-	}
+	title := accent.Render("Keys") + faint.Render("  ·  in "+panelNames[m.panel()])
 	box := frame(title, append(append([]string{""}, inner...), ""), bw, len(inner)+4, true)
 	return floatOver(lines, box, w, bw)
-}
-
-func anyOff(gs ...keyGroup) bool {
-	for _, g := range gs {
-		for _, r := range g.rows {
-			if r.off {
-				return true
-			}
-		}
-	}
-	return false
 }

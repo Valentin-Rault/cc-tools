@@ -74,7 +74,7 @@ func TestKeysPopup(t *testing.T) {
 	}
 }
 
-// Keys that do nothing where the focus is are dimmed, and the title says why.
+// Keys that do nothing where the focus is are dimmed, and the title says where that is.
 func TestKeysPopupDimsWhatDoesNothing(t *testing.T) {
 	m := searchModel(t)
 	m.width, m.height = 150, 30
@@ -101,7 +101,7 @@ func TestKeysPopupDimsWhatDoesNothing(t *testing.T) {
 		t.Error("n N is dimmed with a search on")
 	}
 	typeIn(m, "?")
-	if v := screen(m); !strings.Contains(v, "in To review; dimmed ones do nothing now") {
+	if v := screen(m); !strings.Contains(v, "Keys  ·  in To review ─") {
 		t.Errorf("the title doesn't say where the focus is:\n%s", v)
 	}
 }

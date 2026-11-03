@@ -1,22 +1,16 @@
 package main
 
 import (
-	"cmp"
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 )
 
-// Tabs by stage: pr-watch keeps each Claude session that works in the repo in the zellij tab of its stage.
-// zellij's command line can't move a pane to another tab, so a small plugin does (zellij-tabs/, built to
-// pr-watch-tabs.wasm), asked through `zellij pipe`.
+// Tabs by stage: pr-watch keeps each Claude session that works in the repo in the tab of its stage, a zellij tab or a
+// tmux window; the multiplexer moves the panes (mux.go).
 const (
 	stageWIP       = "WIP"       // no PR yet, or only drafts
 	stageReview    = "In review" // a PR of yours out of draft; a stack as soon as one of its PRs is
@@ -145,52 +139,8 @@ func sameSession(o Owner, s Session) bool {
 
 // paneSpot is where a session's pane is now.
 type paneSpot struct {
-	zellij, pane, tab string
-	focused           bool // someone is looking at it: moving it would yank their view
-}
-
-// locate finds each session's pane, its tab and whether a zellij client has it focused, by session ID.
-func locate(sessions []Session) map[string]paneSpot {
-	spots := map[string]paneSpot{}
-	type layout struct {
-		tabOf   map[string]string
-		focused map[string]bool
-	}
-	layouts := map[string]*layout{}
-	for _, s := range sessions {
-		zs, pane, err := paneOf(s.Pid)
-		if err != nil {
-			continue
-		}
-		l, ok := layouts[zs]
-		if !ok {
-			l = &layout{tabOf: map[string]string{}, focused: map[string]bool{}}
-			layouts[zs] = l
-			var panes []struct {
-				ID       int    `json:"id"`
-				IsPlugin bool   `json:"is_plugin"`
-				TabName  string `json:"tab_name"`
-			}
-			if out, err := zellij(zs, "list-panes", "--all", "--json"); err == nil && json.Unmarshal([]byte(out), &panes) == nil {
-				for _, p := range panes {
-					if !p.IsPlugin {
-						l.tabOf[strconv.Itoa(p.ID)] = p.TabName
-					}
-				}
-			}
-			if out, err := zellij(zs, "list-clients"); err == nil {
-				for _, line := range strings.Split(out, "\n")[1:] { // "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND"
-					if f := strings.Fields(line); len(f) > 1 {
-						l.focused[strings.TrimPrefix(f[1], "terminal_")] = true
-					}
-				}
-			}
-		}
-		if tab, ok := l.tabOf[pane]; ok {
-			spots[s.SessionID] = paneSpot{zellij: zs, pane: pane, tab: tab, focused: l.focused[pane]}
-		}
-	}
-	return spots
+	where, pane, tab string // where: the zellij session or tmux server
+	focused          bool   // someone is looking at it: moving it would yank their view
 }
 
 // tabMove is the plan for one session.
@@ -219,7 +169,7 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 		case st == "":
 			m.Act, m.Why = "skip", "doesn't work in the repo"
 		case !inZellij:
-			m.Act, m.Why = "skip", "not in a zellij pane"
+			m.Act, m.Why = "skip", "not in a pane of the multiplexer pr-watch runs in"
 		case tabBase(spot.tab) == st:
 			m.Act, m.Why = "there", "in its tab"
 		case st == stageWIP && placed[s.SessionID] != stageReview:
@@ -238,14 +188,15 @@ func (v tabView) plan(sessions []Session, spots map[string]paneSpot, placed map[
 	return moves
 }
 
-// arrange asks the plugin for the moves and records the sessions seen in their tab. A move counts once pr-watch sees
-// the pane in its tab, on a later round: the plugin moves panes one at a time, after answering.
-func arrange(store Store, plugin string, moves []tabMove, tries map[string]int) (asked, arrived []tabMove, err error) {
+// arrange asks the multiplexer for the moves and records the sessions seen in their tab. A move counts once
+// pr-watch sees the pane in its tab, on a later round: zellij's plugin moves panes one at a time, after answering.
+// Without a multiplexer nothing moves.
+func arrange(store Store, mx mux, moves []tabMove, tries map[string]int) (asked, arrived []tabMove, err error) {
 	placed := store.TabsPlaced()
 	moves = slices.Clone(moves) // in stage order, so new tabs are created in that order too
 	slices.SortStableFunc(moves, func(a, b tabMove) int { return slices.Index(stageOrder, a.Stage) - slices.Index(stageOrder, b.Stage) })
-	byZellij := map[string][]tabMove{}
-	var sessions []string
+	byWhere := map[string][]tabMove{}
+	var wheres []string
 	for _, m := range moves {
 		switch m.Act {
 		case "there":
@@ -255,17 +206,20 @@ func arrange(store Store, plugin string, moves []tabMove, tries map[string]int) 
 			placed[m.Session.SessionID] = m.Stage
 			delete(tries, m.Session.SessionID)
 		case "move":
-			if _, ok := byZellij[m.spot.zellij]; !ok {
-				sessions = append(sessions, m.spot.zellij)
+			if _, ok := byWhere[m.spot.where]; !ok {
+				wheres = append(wheres, m.spot.where)
 			}
-			byZellij[m.spot.zellij] = append(byZellij[m.spot.zellij], m)
+			byWhere[m.spot.where] = append(byWhere[m.spot.where], m)
 		}
 	}
-	for _, zs := range sessions {
-		if err = moveToTabs(plugin, zs, byZellij[zs]); err != nil {
+	for _, w := range wheres {
+		if mx == nil {
 			break
 		}
-		for _, m := range byZellij[zs] {
+		if err = mx.MoveToTabs(byWhere[w]); err != nil {
+			break
+		}
+		for _, m := range byWhere[w] {
 			tries[m.Session.SessionID]++
 			asked = append(asked, m)
 		}
@@ -274,61 +228,6 @@ func arrange(store Store, plugin string, moves []tabMove, tries map[string]int) 
 		err = serr
 	}
 	return asked, arrived, err
-}
-
-// moveToTabs asks the plugin to move these panes, one "<pane> <placeholder> <tab name>" line each; zellij launches
-// the plugin the first time. zellij 0.45.1 can't move a pane into most existing tabs, so for a tab that exists
-// pr-watch opens a placeholder pane in it, without focus, and the plugin replaces it with the pane; "-" sends the pane
-// to a new tab. A placeholder the plugin doesn't use closes by itself.
-func moveToTabs(plugin, zellijSession string, moves []tabMove) error {
-	if _, err := os.Stat(plugin); err != nil {
-		return fmt.Errorf("the tabs plugin isn't installed (%s): run make install", plugin)
-	}
-	ids := tabIDs(zellijSession)
-	var lines []string
-	for _, m := range moves {
-		placeholder := "-"
-		if id, ok := ids[m.Stage]; ok {
-			out, err := zellij(zellijSession, "new-pane", "--tab-id", strconv.Itoa(id), "--no-focus", "--close-on-exit",
-				"--name", "pr-watch is moving a session here", "--", "sleep", "20")
-			if err != nil {
-				return err
-			}
-			placeholder = strings.TrimPrefix(strings.TrimSpace(out), "terminal_")
-		}
-		lines = append(lines, m.spot.pane+" "+placeholder+" "+m.Stage)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "zellij", "--session", zellijSession, "pipe", "--plugin", "file:"+plugin,
-		"--name", "move", "--", strings.Join(lines, "\n")).CombinedOutput()
-	answer := strings.TrimSpace(string(out))
-	switch {
-	case ctx.Err() != nil:
-		return fmt.Errorf("the tabs plugin didn't answer: grant it its permissions in zellij")
-	case err != nil:
-		return fmt.Errorf("zellij pipe: %v %s", err, answer)
-	case !strings.HasPrefix(answer, "queued"):
-		return fmt.Errorf("tabs plugin: %q", cmp.Or(answer, "no answer"))
-	}
-	return nil
-}
-
-// tabIDs is the ID of each tab of a zellij session, by its name without badges; the first tab of a name wins.
-func tabIDs(zellijSession string) map[string]int {
-	var tabs []struct {
-		Name  string `json:"name"`
-		TabID int    `json:"tab_id"`
-	}
-	ids := map[string]int{}
-	if out, err := zellij(zellijSession, "list-tabs", "--json"); err == nil && json.Unmarshal([]byte(out), &tabs) == nil {
-		for _, t := range tabs {
-			if _, ok := ids[tabBase(t.Name)]; !ok {
-				ids[tabBase(t.Name)] = t.TabID
-			}
-		}
-	}
-	return ids
 }
 
 // withBranches fills in the branch each session's worktree has checked out.
@@ -382,7 +281,11 @@ func printTabsPlan(store Store) error {
 	}
 	sessions = withBranches(sessions)
 	placed := store.TabsPlaced()
-	moves := v.plan(sessions, locate(sessions), placed, nil)
+	spots := map[string]paneSpot{}
+	if mx := detectMux(cfg.TabsPlugin); mx != nil {
+		spots = mx.Locate(sessions)
+	}
+	moves := v.plan(sessions, spots, placed, nil)
 	last := map[string]bool{}
 	for _, f := range v.lastMessages(moves, placed, store.Farewells()) {
 		last[f.Session.SessionID] = true

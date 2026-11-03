@@ -2,11 +2,8 @@ package main
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -60,35 +57,14 @@ func worktreeFor(repoDir, branch string, pr int) (string, error) {
 	return path, git("worktree", "add", path, branch) // DWIM: tracks origin/<branch> when there's no local one
 }
 
-// openTab starts an interactive Claude session in the tab named title of the zellij session pr-watch runs in, or in a
-// new tab of that name. Its pane is titled like any other Claude pane, with what the session works on.
-func openTab(title, dir string, claudeArgs ...string) error {
-	here := os.Getenv("ZELLIJ_SESSION_NAME")
-	if here == "" {
-		return errors.New("pr-watch isn't running inside zellij")
-	}
+// claudeArgv is the command that starts an interactive Claude session with these arguments. Its pane is titled like
+// any other Claude pane, with the topic Claude finds for the session, not its -n name.
+func claudeArgv(args ...string) ([]string, error) {
 	bin, err := exec.LookPath(claudeBin())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// the topic Claude finds for the session, not its -n name
-	claudeArgs = append([]string{"--settings", `{"terminalTitleFromRename":false}`}, claudeArgs...)
-	if id, ok := tabIDs(here)[title]; ok { // a tab of that name already: open the session there and show it
-		tab := strconv.Itoa(id)
-		// zellij names a pane it starts with a command after the command, which hides the title Claude sets: an
-		// empty name keeps it out (a new tab's pane isn't named)
-		pane, err := zellij(here, append([]string{"new-pane", "--tab-id", tab, "--name", "", "--cwd", dir, "--", bin}, claudeArgs...)...)
-		if err != nil {
-			return err
-		}
-		if _, err := zellij(here, "go-to-tab-by-id", tab); err != nil {
-			return err
-		}
-		_, err = zellij(here, "focus-pane-id", strings.TrimSpace(pane))
-		return err
-	}
-	_, err = zellij(here, append([]string{"new-tab", "--name", title, "--cwd", dir, "--", bin}, claudeArgs...)...)
-	return err
+	return append([]string{bin, "--settings", `{"terminalTitleFromRename":false}`}, args...), nil
 }
 
 // handover is the opening prompt of a session that takes a PR over: what the PR is, then its events.

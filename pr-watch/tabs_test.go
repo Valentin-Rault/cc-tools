@@ -90,11 +90,11 @@ func TestArrange(t *testing.T) {
 	tries := map[string]int{}
 	a := Session{SessionID: "a", Name: "a"}
 	moves := []tabMove{
-		{Session: a, Stage: stageReview, Act: "move", spot: paneSpot{zellij: "z", pane: "12"}},
+		{Session: a, Stage: stageReview, Act: "move", spot: paneSpot{where: "z", pane: "12"}},
 		{Session: Session{SessionID: "b"}, Stage: stageWIP, Act: "there"},
 		{Session: Session{SessionID: "c"}, Stage: stageDone, Act: "wait"},
 	}
-	asked, arrived, err := arrange(store, plugin, moves, tries)
+	asked, arrived, err := arrange(store, zellijMux{plugin: plugin}, moves, tries)
 	if err != nil || len(asked) != 1 || len(arrived) != 0 || tries["a"] != 1 {
 		t.Fatalf("asked %v, arrived %v, tries %v, err %v", asked, arrived, tries, err)
 	}
@@ -108,7 +108,7 @@ func TestArrange(t *testing.T) {
 		t.Errorf("placed after asking = %v: a isn't there yet", p)
 	}
 	// the next round sees it in its tab
-	_, arrived, err = arrange(store, plugin, []tabMove{{Session: a, Stage: stageReview, Act: "there"}}, tries)
+	_, arrived, err = arrange(store, zellijMux{plugin: plugin}, []tabMove{{Session: a, Stage: stageReview, Act: "there"}}, tries)
 	if err != nil || len(arrived) != 1 || store.TabsPlaced()["a"] != stageReview || tries["a"] != 0 {
 		t.Errorf("arrived %v, placed %v, tries %v, err %v", arrived, store.TabsPlaced(), tries, err)
 	}
@@ -118,9 +118,9 @@ func TestArrangeAsksOncePerZellijSessionInStageOrder(t *testing.T) {
 	plugin, calls := fakeZellij(t, "queued 4", `[{"name":"WIP","tab_id":5},{"name":"WIP","tab_id":9}]`)
 	var moves []tabMove
 	for i, st := range []string{stageDone, stageWIP, stageReviewing, stageReview} {
-		moves = append(moves, tabMove{Session: Session{SessionID: st}, Stage: st, Act: "move", spot: paneSpot{zellij: "z", pane: strconv.Itoa(i)}})
+		moves = append(moves, tabMove{Session: Session{SessionID: st}, Stage: st, Act: "move", spot: paneSpot{where: "z", pane: strconv.Itoa(i)}})
 	}
-	if _, _, err := arrange(Store{Dir: t.TempDir()}, plugin, moves, map[string]int{}); err != nil {
+	if _, _, err := arrange(Store{Dir: t.TempDir()}, zellijMux{plugin: plugin}, moves, map[string]int{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(calls); string(got) != "z 1 90 WIP\n3 - In review\n2 - Reviewing\n0 - Done\n--\n" {
@@ -133,8 +133,8 @@ func TestArrangeAsksOncePerZellijSessionInStageOrder(t *testing.T) {
 
 func TestArrangeNeedsThePluginsAnswer(t *testing.T) {
 	plugin, _ := fakeZellij(t, "", "[]")
-	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageWIP, Act: "move", spot: paneSpot{zellij: "z", pane: "1"}}}
-	if _, _, err := arrange(Store{Dir: t.TempDir()}, plugin, moves, map[string]int{}); err == nil || !strings.Contains(err.Error(), "no answer") {
+	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageWIP, Act: "move", spot: paneSpot{where: "z", pane: "1"}}}
+	if _, _, err := arrange(Store{Dir: t.TempDir()}, zellijMux{plugin: plugin}, moves, map[string]int{}); err == nil || !strings.Contains(err.Error(), "no answer") {
 		t.Errorf("an empty answer must not count as done: %v", err)
 	}
 }

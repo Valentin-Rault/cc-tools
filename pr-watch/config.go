@@ -17,8 +17,8 @@ type Config struct {
 	Ignore  []string `json:"ignore"`   // logins whose reviews and comments never need action (bots)
 	// SecurityTeam is the slug of a team whose review some PRs need; they get a shield in To review.
 	SecurityTeam string `json:"security_team"`
-	// ArrangeTabs moves each Claude session working in the repo to the zellij tab of its stage (WIP, In review,
-	// Reviewing, Done), through the plugin at TabsPlugin.
+	// ArrangeTabs moves each Claude session working in the repo to the tab of its stage (WIP, In review, Reviewing,
+	// Done): a tmux window, or a zellij tab through the plugin at TabsPlugin.
 	ArrangeTabs bool   `json:"arrange_tabs"`
 	TabsPlugin  string `json:"tabs_plugin"`
 	// Notify shows a macOS notification for each review request or mention on someone else's PR. Off by default:

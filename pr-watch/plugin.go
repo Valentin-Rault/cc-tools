@@ -37,7 +37,7 @@ import (
 const pluginAPI = 1
 
 // pluginTimeout: a plugin still running after this is stopped. Something meant to last, like an animation, should go
-// to a pane of its own (zellij run) or the background.
+// to a pane of its own (zellij run, tmux split-window) or the background.
 const pluginTimeout = 30 * time.Second
 
 // pluginEventNames are what "on" can ask for: a PR of yours or one you reviewed merged or closed, and each kind of

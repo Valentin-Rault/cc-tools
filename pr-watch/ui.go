@@ -109,6 +109,7 @@ type model struct {
 
 	themePick *themePicker // t is open
 	keys      keymap
+	mux       mux // zellij or tmux, nil outside both
 }
 
 type choiceKind int
@@ -139,6 +140,7 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true,
 		leftAt: now, backAt: now, seenAt: now}
 	m.keys = newKeymap(cfg.Keys)
+	m.mux = detectMux(cfg.TabsPlugin)
 	var notes []string
 	if cfg.Theme != "" && !useTheme(cfg.Theme) {
 		notes = append(notes, fmt.Sprintf("no theme %q in the config: %s", cfg.Theme,
@@ -197,7 +199,7 @@ func (m *model) arrangeTabs() tea.Cmd {
 	if m.tabTries == nil {
 		m.tabTries = map[string]int{}
 	}
-	sessions, store, cfg, tries := m.sessions, m.store, m.cfg, m.tabTries // only this goroutine touches tries till it's done
+	sessions, store, cfg, tries, mx := m.sessions, m.store, m.cfg, m.tabTries, m.mux // only this goroutine touches tries till it's done
 	var gh GitHub
 	if m.w != nil {
 		gh = m.w.gh
@@ -205,9 +207,13 @@ func (m *model) arrangeTabs() tea.Cmd {
 	return func() tea.Msg {
 		v.repoDirs, v.closed = repoDirs(cfg.RepoDir), store.Closed()
 		placed := store.TabsPlaced()
-		moves := v.plan(sessions, locate(sessions), placed, tries)
+		spots := map[string]paneSpot{}
+		if mx != nil {
+			spots = mx.Locate(sessions)
+		}
+		moves := v.plan(sessions, spots, placed, tries)
 		done := settleFarewells(v.lastMessages(moves, placed, store.Farewells()), gh, cfg.Repo, cfg.RepoDir, v, sessions)
-		asked, arrived, err := arrange(store, cfg.TabsPlugin, moves, tries)
+		asked, arrived, err := arrange(store, mx, moves, tries)
 		return tabsMsg{asked, arrived, done, err}
 	}
 }
@@ -509,7 +515,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			return m, m.send(pr, func(e Event) bool { return e.Status != Sent && e.Status != Sending })
 		case "go_to_owner":
 			if s, ok := resolve(m.sessions, m.ownerOf(pr)); ok {
-				return m, func() tea.Msg { return jumpMsg{jumpTo(s.Pid)} }
+				return m, m.jump(s)
 			}
 			m.flash = fmt.Sprintf("#%d has no running owner to go to", pr)
 		}
@@ -517,6 +523,21 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, m.pluginKey(k)
 	}
 	return m, nil
+}
+
+// jump goes to the session's pane (g).
+func (m *model) jump(s Session) tea.Cmd {
+	mx := m.mux
+	return func() tea.Msg {
+		if mx == nil {
+			return jumpMsg{errors.New("going to a pane " + needsMux)}
+		}
+		where, pane, ok := mx.Pane(s.Pid)
+		if !ok {
+			return jumpMsg{fmt.Errorf("%s doesn't run in a %s pane", s.Name, mx.Name())}
+		}
+		return jumpMsg{mx.Jump(where, pane)}
+	}
 }
 
 // ownerOf is who gets a PR's events: the session picked for it (in the TUI or with `pr-watch claim`), else the
@@ -573,10 +594,10 @@ func (m *model) openPicker(pr int) {
 		}
 		p.choices = append(p.choices, choice{kind: chooseSession, session: x, label: x.Name, note: note})
 	}
-	if os.Getenv("ZELLIJ_SESSION_NAME") == "" {
+	if m.mux == nil {
 		for i := range p.choices {
 			if p.choices[i].kind != chooseSession {
-				p.choices[i].note = "needs pr-watch to run inside zellij"
+				p.choices[i].note = needsMux
 			}
 		}
 	}
@@ -616,12 +637,12 @@ func (m *model) pickerKey(k string) tea.Cmd {
 	return nil
 }
 
-// handOver opens a Claude session in a new zellij tab that owns the PR from then on. Its waiting events become
+// handOver opens a Claude session in a new tab (a tmux window) that owns the PR from then on. Its waiting events become
 // the session's opening prompt. The PR is claimed for the new session's ID before it starts, so its own claim (or a
 // send from dispatch) can't race the prompt.
 func (m *model) handOver(pr int, c choice) tea.Cmd {
-	if os.Getenv("ZELLIJ_SESSION_NAME") == "" {
-		m.flash = "opening a tab needs pr-watch to run inside zellij"
+	if m.mux == nil {
+		m.flash = "opening a tab " + needsMux
 		return nil
 	}
 	if m.inflight[pr] {
@@ -661,21 +682,29 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 		}
 	}
 	m.flash = fmt.Sprintf("#%d: opening a session in the %s tab", pr, title)
+	mx := m.mux
+	openTab := func(dir string, args ...string) error {
+		argv, err := claudeArgv(args...)
+		if err != nil {
+			return err
+		}
+		return mx.OpenTab(title, dir, argv)
+	}
 	return func() tea.Msg {
 		var err error
 		switch {
 		case c.kind == chooseResume:
-			err = openTab(title, c.link.Cwd, "--resume", c.link.SessionID, prompt)
+			err = openTab(c.link.Cwd, "--resume", c.link.SessionID, prompt)
 		case info.Reviewing:
 			dir := repoDir
 			if trees, terr := worktrees(repoDir); terr == nil && trees[info.Branch] != "" {
 				dir = trees[info.Branch]
 			}
-			err = openTab(title, dir, "--session-id", owner.SessionID, "-n", owner.Name, prompt)
+			err = openTab(dir, "--session-id", owner.SessionID, "-n", owner.Name, prompt)
 		default:
 			var dir string
 			if dir, err = worktreeFor(repoDir, info.Branch, pr); err == nil {
-				err = openTab(title, dir, "--session-id", owner.SessionID, "-n", owner.Name, prompt)
+				err = openTab(dir, "--session-id", owner.SessionID, "-n", owner.Name, prompt)
 			}
 		}
 		return launchedMsg{pr: pr, owner: owner, prev: prev, hadPrev: hadPrev, err: err}

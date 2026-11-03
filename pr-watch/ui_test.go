@@ -18,6 +18,7 @@ func testModel(t *testing.T) *model {
 	store.Claim(Owner{"feat-rollback", "id-1"}, []int{2720})
 	store.Claim(Owner{"feat-ledger", "id-gone"}, []int{2731})
 	m := newModel(Config{Repo: "acme/widgets"}, store, &Watcher{}, nil)
+	m.mux = nil // whatever multiplexer the tests run in
 	m.prs = map[string]Stored{
 		"2720": {Title: "Rollback docs for the deploy pipeline", CI: "FAILURE", Failing: []string{"lint", "deploy"}, Branch: "rb", Review: "CHANGES_REQUESTED"},
 		"2731": {Title: "Ledger import", CI: "PENDING", Branch: "ledger", Review: "APPROVED"},
@@ -148,7 +149,7 @@ func TestPicker(t *testing.T) {
 	m := testModel(t)
 	m.cfg.RepoDir = t.TempDir() // not a git repo: the new session would get a fresh worktree
 	m.links = map[int]prLink{2740: {SessionID: "id-old", Cwd: t.TempDir(), At: time.Now().Add(-3 * time.Hour).Format(time.RFC3339)}}
-	t.Setenv("ZELLIJ_SESSION_NAME", "z")
+	m.mux = tmuxMux{}
 	m.openPicker(2740)
 	p := m.picker
 	if len(p.choices) != 4 || p.choices[0].kind != chooseResume || p.choices[1].kind != chooseNew {
@@ -172,7 +173,10 @@ func TestPicker(t *testing.T) {
 // Handing over claims the PR for the new session before it starts, and gives it back if the tab can't open.
 func TestHandOverRollsBackWhenTheTabFails(t *testing.T) {
 	m := testModel(t)
-	t.Setenv("ZELLIJ_SESSION_NAME", "z")
+	if m.handOver(2731, choice{kind: chooseNew}) != nil || !strings.Contains(m.flash, "zellij or tmux") {
+		t.Errorf("outside a multiplexer: flash %q", m.flash)
+	}
+	m.mux = tmuxMux{}
 	cmd := m.handOver(2731, choice{kind: chooseNew})
 	if cmd == nil {
 		t.Fatal("no launch command")
@@ -431,6 +435,7 @@ func TestLikelyReviewer(t *testing.T) {
 // with the reviewer's instructions.
 func TestReviewedPRsRouteToTheReviewSession(t *testing.T) {
 	m := reviewingModel(t)
+	m.mux = tmuxMux{}
 	m.events = append(m.events, Event{PR: 2757, Text: "reply by frank u/r1", Role: "reviewer"})
 	m.dispatch()
 	if e := m.events[len(m.events)-1]; e.Status != NeedsOwner {

@@ -104,8 +104,8 @@ func (z zellijMux) OpenTab(title, dir string, argv []string) error {
 func (z zellijMux) Locate(pids []int) map[int]Spot {
 	spots := map[int]Spot{}
 	type layout struct {
-		tabOf   map[string]string
-		focused map[string]bool
+		panes   map[int]ZellijPane
+		focused map[int]bool
 	}
 	layouts := map[string]*layout{}
 	for _, pid := range pids {
@@ -115,33 +115,95 @@ func (z zellijMux) Locate(pids []int) map[int]Spot {
 		}
 		l, ok := layouts[zs]
 		if !ok {
-			l = &layout{tabOf: map[string]string{}, focused: map[string]bool{}}
+			l = &layout{}
+			l.panes, _ = ZellijPanes(zs)
+			l.focused, _ = ZellijFocused(zs)
 			layouts[zs] = l
-			var panes []struct {
-				ID       int    `json:"id"`
-				IsPlugin bool   `json:"is_plugin"`
-				TabName  string `json:"tab_name"`
-			}
-			if out, err := zellij(zs, "list-panes", "--all", "--json"); err == nil && json.Unmarshal([]byte(out), &panes) == nil {
-				for _, p := range panes {
-					if !p.IsPlugin {
-						l.tabOf[strconv.Itoa(p.ID)] = p.TabName
-					}
-				}
-			}
-			if out, err := zellij(zs, "list-clients"); err == nil {
-				for _, line := range strings.Split(out, "\n")[1:] { // "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND"
-					if f := strings.Fields(line); len(f) > 1 {
-						l.focused[strings.TrimPrefix(f[1], "terminal_")] = true
-					}
-				}
-			}
 		}
-		if tab, ok := l.tabOf[pane]; ok {
-			spots[pid] = Spot{Where: zs, Pane: pane, Tab: tab, Focused: l.focused[pane]}
+		id, _ := strconv.Atoi(pane)
+		if p, ok := l.panes[id]; ok {
+			spots[pid] = Spot{Where: zs, Pane: pane, Tab: p.TabName, Focused: l.focused[id]}
 		}
 	}
 	return spots
+}
+
+// ZellijPane is a terminal pane as zellij lists it.
+type ZellijPane struct {
+	ID          int    `json:"id"`
+	IsPlugin    bool   `json:"is_plugin"`
+	IsFloating  bool   `json:"is_floating"`
+	TabID       int    `json:"tab_id"`
+	TabPosition int    `json:"tab_position"`
+	TabName     string `json:"tab_name"`
+	Title       string `json:"title"`
+	Command     string `json:"pane_command"`
+	Cwd         string `json:"pane_cwd"`
+}
+
+// ZellijPanes is the terminal panes of a zellij session, by ID; plugins left out.
+func ZellijPanes(session string) (map[int]ZellijPane, error) {
+	out, err := zellij(session, "list-panes", "--all", "--json")
+	if err != nil {
+		return nil, err
+	}
+	var all []ZellijPane
+	if err := json.Unmarshal([]byte(out), &all); err != nil {
+		return nil, fmt.Errorf("zellij list-panes: %w", err)
+	}
+	panes := map[int]ZellijPane{}
+	for _, p := range all {
+		if !p.IsPlugin {
+			panes[p.ID] = p
+		}
+	}
+	return panes, nil
+}
+
+// ZellijTab is a tab as zellij lists it.
+type ZellijTab struct {
+	TabID int    `json:"tab_id"`
+	Name  string `json:"name"`
+}
+
+func ZellijTabs(session string) ([]ZellijTab, error) {
+	out, err := zellij(session, "list-tabs", "--json")
+	if err != nil {
+		return nil, err
+	}
+	var tabs []ZellijTab
+	if err := json.Unmarshal([]byte(out), &tabs); err != nil {
+		return nil, fmt.Errorf("zellij list-tabs: %w", err)
+	}
+	return tabs, nil
+}
+
+// ZellijFocused is the terminal panes an attached client has focused.
+func ZellijFocused(session string) (map[int]bool, error) {
+	out, err := zellij(session, "list-clients")
+	if err != nil {
+		return nil, err
+	}
+	focused := map[int]bool{}
+	for _, line := range strings.Split(out, "\n")[1:] { // "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND"
+		if f := strings.Fields(line); len(f) > 1 {
+			if id, err := strconv.Atoi(strings.TrimPrefix(f[1], "terminal_")); err == nil && strings.HasPrefix(f[1], "terminal_") {
+				focused[id] = true
+			}
+		}
+	}
+	return focused, nil
+}
+
+// ZellijAction runs `zellij --session <session> action <args>`.
+func ZellijAction(session string, args ...string) (string, error) { return zellij(session, args...) }
+
+// ZellijBin is zellij's path: on PATH, else where Homebrew puts it, for hooks that run with a short PATH.
+func ZellijBin() string {
+	if p, err := exec.LookPath("zellij"); err == nil {
+		return p
+	}
+	return "/opt/homebrew/bin/zellij"
 }
 
 // MoveToTabs asks the plugin to move these panes, one "<pane> <placeholder> <tab name>" line each; zellij launches
@@ -203,8 +265,11 @@ func tabIDs(zellijSession string) map[string]int {
 	return ids
 }
 
+// zellij runs an action in a session; one that hangs is stopped after 5 seconds.
 func zellij(session string, args ...string) (string, error) {
-	cmd := exec.Command("zellij", append([]string{"--session", session, "action"}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ZellijBin(), append([]string{"--session", session, "action"}, args...)...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

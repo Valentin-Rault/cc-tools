@@ -10,8 +10,7 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 
 macOS, Claude Code, `gh` (logged in), `git`, `jq`, and Go 1.24+ to build pr-watch. pr-watch runs in any terminal;
 a few of its features need zellij 0.45+ or tmux 3.0+ ([which](#in-zellij-tmux-or-neither)), and in zellij, Rust with
-the `wasm32-wasip1` target to build its plugin (`make install` skips it without `cargo`). cc-status needs zellij and
-Python 3.
+the `wasm32-wasip1` target to build its plugin (`make install` skips it without `cargo`). cc-status needs zellij.
 
 ```sh
 make install   # builds pr-watch into ~/.claude/pr-watch/ and links it and cc-status into ~/.local/bin, pr-guard into ~/.claude/hooks
@@ -257,7 +256,9 @@ pr-watch plugins allow confetti        # pr-watch plugins deny confetti stops it
 ## cc-status
 
 Which Claude Code sessions in your zellij panes need you: ● needs you (permission, question, plan approval),
-✓ finished and not visited yet, ◐ working. It's a single stdlib-only Python file driven by Claude Code hooks.
+✓ finished and not visited yet, ◐ working. It's driven by Claude Code hooks, and shares its zellij code with
+pr-watch (`internal/mux`). `cc-status/cc-status.py` is the earlier Python version, kept for now: it reads and writes
+the same state files, so linking it to `~/.local/bin/cc-status` switches back.
 
 ```sh
 cc-status ui     # pick a session and jump to it; meant for a floating zellij pane

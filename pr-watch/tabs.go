@@ -102,17 +102,29 @@ func (v tabView) reviewing(s Session) bool {
 // finished: the session worked on or reviewed a PR that pr-watch saw merged or closed. Not being among your open
 // PRs isn't enough: a PR opened a minute ago isn't there yet, nor is someone else's that the session only looked up.
 func (v tabView) finished(s Session) bool {
+	prs, _ := v.finishedPRs(s)
+	return len(prs) > 0
+}
+
+// finishedPRs are those PRs, newest first: the ones it worked on (Claude Code's link), else the ones it clearly
+// reviewed, and then reviewer is true.
+func (v tabView) finishedPRs(s Session) (prs []int, reviewer bool) {
 	for pr, l := range v.links {
 		if l.SessionID == s.SessionID && v.closed[pr] {
-			return true
+			prs = append(prs, pr)
 		}
 	}
-	for pr := range v.mentions {
-		if r, ok := clearReviewer(v.mentions, pr); ok && r.SessionID == s.SessionID && v.closed[pr] {
-			return true
+	if len(prs) == 0 {
+		for pr := range v.mentions {
+			if r, ok := clearReviewer(v.mentions, pr); ok && r.SessionID == s.SessionID && v.closed[pr] {
+				prs = append(prs, pr)
+			}
 		}
+		reviewer = len(prs) > 0
 	}
-	return false
+	slices.Sort(prs)
+	slices.Reverse(prs)
+	return prs, reviewer
 }
 
 func (v tabView) inRepo(cwd string) bool {
@@ -369,11 +381,19 @@ func printTabsPlan(store Store) error {
 		return err
 	}
 	sessions = withBranches(sessions)
-	moves := v.plan(sessions, locate(sessions), store.TabsPlaced(), nil)
+	placed := store.TabsPlaced()
+	moves := v.plan(sessions, locate(sessions), placed, nil)
+	last := map[string]bool{}
+	for _, f := range v.lastMessages(moves, placed, store.Farewells()) {
+		last[f.Session.SessionID] = true
+	}
 	fmt.Printf("%-24s %-10s %-22s %s\n", "SESSION", "STAGE", "NOW IN TAB", "WHAT HAPPENS")
 	for _, m := range moves {
 		what := map[string]string{"move": "moves to " + m.Stage, "there": "stays, in its tab", "stay": "stays: " + m.Why,
 			"wait": "moves to " + m.Stage + " once you leave it", "stuck": "stuck: " + m.Why, "skip": "left alone: " + m.Why}[m.Act]
+		if last[m.Session.SessionID] {
+			what += "; gets its last message, to clean up"
+		}
 		fmt.Printf("%-24s %-10s %-22s %s\n", m.Session.Name, m.Stage, m.spot.tab, what)
 	}
 	if !cfg.ArrangeTabs {

@@ -149,6 +149,18 @@ its stage changes again. A session with no PR yet, or only drafts, stays in the 
 only one coming back from In review, its PR in draft again, moves to WIP. A session started from the `o` picker opens in the tab of its stage. Sessions working
 outside the repo are left alone. `pr-watch tabs` prints what would move where without moving anything.
 
+**The last message.** A session whose stage turns Done gets one last message, through the events like any other (in
+manual mode it waits for `s`): which of its PRs merged and which closed without merging, and to clean up what the
+work leaves on the machine, but only what it can tell is safe. Its local branch can go if it holds nothing the PR
+didn't: the session checks that against the PR's last head (`git merge-base --is-ancestor`), since a squash or
+rebase merge leaves the branch out of the base branch's history and `git branch -d` can't tell. The branch also
+stays if an open PR is based on it or a stash holds work on it. Its worktree can go if that branch can and nothing
+is uncommitted. The main clone stays, and so does any worktree another Claude session runs in. What the repo's
+instructions say a worktree holds, like a local stack, is stopped first, then `git worktree remove` (never
+`--force`) and `git branch -D`. A PR closed without merging keeps everything, and remote branches are left alone. The
+session then says what it removed and what's left. A session that was already in the Done tab gets none, and none
+gets two for the same PRs.
+
 zellij's command line can't move a pane to another tab, so a small plugin does (`zellij-tabs/`, Rust built for
 `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
 `zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`. In zellij 0.45.1 the plugin API

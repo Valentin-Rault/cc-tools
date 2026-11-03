@@ -64,9 +64,10 @@ type Event struct {
 	PR     int       `json:"pr"`
 	Text   string    `json:"text"` // "<kind> <details>", e.g. "comment by alice https://…"
 	Status Status    `json:"status"`
-	Owner  string    `json:"owner,omitempty"` // the session it went (or was going) to
-	Note   string    `json:"note,omitempty"`  // why a send failed
-	Role   string    `json:"role,omitempty"`  // "reviewer" on a PR you reviewed; empty on your own PRs
+	Owner  string    `json:"owner,omitempty"`  // the session it went (or was going) to
+	Note   string    `json:"note,omitempty"`   // why a send failed
+	Role   string    `json:"role,omitempty"`   // "reviewer" on a PR you reviewed; empty on your own PRs
+	Prompt string    `json:"prompt,omitempty"` // instructions in place of the usual ones: the last message to a session
 }
 
 var failedConclusions = []string{"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED"}

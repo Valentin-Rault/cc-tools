@@ -377,6 +377,7 @@ var kinds = map[string]struct {
 	"comment": {"✎", cyan}, "left-merge-queue": {"↩", yellow}, "conflicts": {"⚠", orange},
 	"reply": {"↳", cyan}, "pushed": {"↑", yellow}, "asked-again": {"↻", yellow}, // on PRs you reviewed
 	"approved": {"✓", green},
+	"merged":   {"✔", accent}, "closed": {"⊘", text2}, // the last message to a session that's done
 }
 
 // eventRows lays the events out newest first, under a line per day, with a line under the new ones saying since

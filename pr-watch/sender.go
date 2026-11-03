@@ -23,11 +23,15 @@ Sent by the pr-watch TUI; no reply needed.`
 const reviewerInstructions = `This is a PR the user reviewed. Read the replies and the new commits, then draft the follow-up (replies, new review comments, threads to resolve) and show it to the user before posting anything. Never approve or request changes without the user's OK, and never merge.
 Sent by the pr-watch TUI; no reply needed.`
 
-// message is what the owner session receives: one "[pr-watch event]" line per event, then what to do.
+// message is what the owner session receives: one "[pr-watch event]" line per event, then what to do: the event's
+// own instructions if it has some (the last message), else the usual ones.
 func message(pr int, events []Event) string {
 	var b strings.Builder
 	for _, e := range events {
 		fmt.Fprintf(&b, "[pr-watch event] PR #%d: %s\n", pr, e.Text)
+	}
+	if i := slices.IndexFunc(events, func(e Event) bool { return e.Prompt != "" }); i >= 0 {
+		return b.String() + "\n" + events[i].Prompt
 	}
 	if slices.ContainsFunc(events, func(e Event) bool { return e.Role == "reviewer" }) {
 		return b.String() + "\n" + reviewerInstructions

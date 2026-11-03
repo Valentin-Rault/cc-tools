@@ -42,6 +42,7 @@ type (
 	jumpMsg struct{ err error }
 	tabsMsg struct {
 		asked, arrived []tabMove
+		done           []farewell // sessions that turned Done: their last message
 		err            error
 	}
 	queuedMsg struct {
@@ -184,10 +185,17 @@ func (m *model) arrangeTabs() tea.Cmd {
 		m.tabTries = map[string]int{}
 	}
 	sessions, store, cfg, tries := m.sessions, m.store, m.cfg, m.tabTries // only this goroutine touches tries till it's done
+	var gh GitHub
+	if m.w != nil {
+		gh = m.w.gh
+	}
 	return func() tea.Msg {
 		v.repoDirs, v.closed = repoDirs(cfg.RepoDir), store.Closed()
-		asked, arrived, err := arrange(store, cfg.TabsPlugin, v.plan(sessions, locate(sessions), store.TabsPlaced(), tries), tries)
-		return tabsMsg{asked, arrived, err}
+		placed := store.TabsPlaced()
+		moves := v.plan(sessions, locate(sessions), placed, tries)
+		done := settleFarewells(v.lastMessages(moves, placed, store.Farewells()), gh, cfg.Repo, cfg.RepoDir, v, sessions)
+		asked, arrived, err := arrange(store, cfg.TabsPlugin, moves, tries)
+		return tabsMsg{asked, arrived, done, err}
 	}
 }
 
@@ -217,7 +225,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Refreshed {
 			m.toReview, m.reviewed = msg.ToReview, msg.Reviewed
 		}
-		m.dropEvents(func(e Event) bool { return slices.Contains(msg.Closed, e.PR) })
+		m.dropEvents(func(e Event) bool { return slices.Contains(msg.Closed, e.PR) && e.Prompt == "" }) // not a last message
 		m.events = append(m.events, msg.Events...)
 		if len(m.events) > 200 {
 			m.events = m.events[len(m.events)-200:]
@@ -270,6 +278,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "tabs: " + e
 		}
 		m.tabsErr = map[bool]string{true: fmt.Sprint(msg.err), false: ""}[msg.err != nil]
+		for _, f := range msg.done {
+			m.queueFarewell(f)
+		}
+		return m, m.dispatch()
 
 	case linksMsg:
 		m.linking, m.links, m.mentions = false, msg.links, msg.mentions
@@ -290,6 +302,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		result := "sent → " + msg.owner
 		if msg.err != nil {
 			result = "failed → " + msg.owner + ": " + msg.err.Error()
+		} else if m.store.Closed()[msg.pr] { // the last message went: the PR needs no owner anymore
+			m.store.Unclaim([]int{msg.pr})
+			m.owners = m.store.Owners()
 		}
 		m.log(msg.pr, result)
 		return m, m.dispatch()

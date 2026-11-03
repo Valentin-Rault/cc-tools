@@ -155,6 +155,55 @@ zellij's command line can't move a pane to another tab, so a small plugin does (
 can't move a pane into most existing tabs either, so pr-watch opens a placeholder pane in the tab, without focus, and
 the plugin swaps the session's pane in for it.
 
+### Plugins
+
+What suits some people and not others, like confetti when your PR merges, goes in a plugin, outside this repo. A
+plugin is a folder in `~/.config/pr-watch/plugins/` (`plugins_dir` in the config), usually a git clone, with a
+`plugin.json`:
+
+```json
+{
+  "api": 1,
+  "description": "confetti when one of your PRs merges",
+  "on": ["merged"],
+  "run": ["./fire.sh"],
+  "keys": [{"key": "C", "does": "fire the cannon", "run": ["./fire.sh", "--now"]}]
+}
+```
+
+pr-watch runs `run` on each event in `on`, and a key's `run` when you press it, in the plugin's folder, with what
+happened as one JSON object on stdin:
+
+```json
+{"api": 1, "event": "merged", "at": "2026-11-03T09:29:08Z", "repo": "acme/widgets",
+ "pr": {"number": 2740, "title": "Project refs", "url": "https://github.com/acme/widgets/pull/2740",
+        "branch": "feat-refs", "author": "you", "role": "author"}}
+```
+
+- **Events:** `merged` and `closed`, for a PR of yours or one you reviewed (`pr.role` is `author` or `reviewer`),
+  and each kind of line in the Events panel: `ci-failed`, `conflicts`, `review`, `changes-requested`, `approved`,
+  `comment` and `left-merge-queue` on yours, `asked-again`, `pushed`, `reply` and `comment` on those you reviewed.
+  Those carry the line as `text` and its link as `url`. `"*"` asks for all of them.
+- **Keys** send `"event": "key"`, the `key`, and the PR on the focused row, if any. They show in `?`; pr-watch's own
+  keys win over a plugin's.
+- **Running:** never through a shell, so nothing in a PR title can become a command. A command with a slash is a
+  path in the plugin's folder; one without is looked up on your `PATH`. The last line it prints shows in the
+  status line; a failure shows there too, and goes in `events.log`. It's stopped after 30 seconds: something meant
+  to last goes in a pane of its own (`zellij run --floating -- …`) or in the background.
+- **The format** is versioned by `api`: fields get added, never renamed or removed.
+
+A plugin runs only once you've allowed it, and stops when any of its files changes (`.git` aside) until you allow it
+again, the way direnv treats `.envrc`: a colleague's update can't quietly start doing something else after a `git
+pull`. So a plugin should write anything it keeps outside its folder. pr-watch says when it finds a plugin that's
+new or changed.
+
+```sh
+git clone <its repo> ~/.config/pr-watch/plugins/confetti
+pr-watch plugins                       # what's there, and whether each may run
+pr-watch plugins try confetti merged   # run it once on a sample event: shows its stdin, stdout and stderr
+pr-watch plugins allow confetti        # pr-watch plugins deny confetti stops it again
+```
+
 ## cc-status
 
 Which Claude Code sessions in your zellij panes need you: ● needs you (permission, question, plan approval),

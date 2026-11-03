@@ -13,7 +13,8 @@ import (
 const usage = `pr-watch                          open the TUI: watch your open PRs, send each event to the PR's owner session
 pr-watch claim <session> <pr>...  route those PRs' events to that Claude session
 pr-watch send <session> [text]    test delivery: send text (or a sample event) to a session, print the outcome
-pr-watch tabs                     show which zellij tab each Claude session would move to, without moving any`
+pr-watch tabs                     show which zellij tab each Claude session would move to, without moving any
+pr-watch plugins [allow|deny|try] list, allow and try your plugins (pr-watch plugins help)`
 
 func main() {
 	store := Store{Dir: stateDir()}
@@ -46,6 +47,14 @@ func main() {
 		}
 	case args[0] == "tabs" && len(args) == 1:
 		if err := printTabsPlan(store); err != nil {
+			fail(err)
+		}
+	case args[0] == "plugins":
+		cfg, err := loadConfig()
+		if err != nil {
+			fail(err)
+		}
+		if err := pluginsCommand(args[1:], cfg, store, os.Stdout); err != nil {
 			fail(err)
 		}
 	case args[0] == "send" && len(args) >= 2:

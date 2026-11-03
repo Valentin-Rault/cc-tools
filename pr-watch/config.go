@@ -24,6 +24,8 @@ type Config struct {
 	// Notify shows a macOS notification for each review request or mention on someone else's PR. Off by default:
 	// the To review list shows them anyway.
 	Notify bool `json:"notify"`
+	// PluginsDir holds the plugins, a folder each (plugin.go); plugins beside this config by default.
+	PluginsDir string `json:"plugins_dir"`
 }
 
 func configPath() string {
@@ -34,9 +36,9 @@ func configPath() string {
 }
 
 func loadConfig() (Config, error) {
-	c := Config{Ignore: []string{"github-actions", "dependabot"},
-		TabsPlugin: filepath.Join(home(), ".config/zellij/plugins/pr-watch-tabs.wasm")}
 	path := configPath()
+	c := Config{Ignore: []string{"github-actions", "dependabot"},
+		TabsPlugin: filepath.Join(home(), ".config/zellij/plugins/pr-watch-tabs.wasm"), PluginsDir: filepath.Join(filepath.Dir(path), "plugins")}
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return c, err
@@ -61,8 +63,10 @@ func loadConfig() (Config, error) {
 	if _, slug, ok := strings.Cut(c.SecurityTeam, "/"); ok { // "org/team" works too
 		c.SecurityTeam = slug
 	}
-	if rest, ok := strings.CutPrefix(c.RepoDir, "~/"); ok {
-		c.RepoDir = filepath.Join(home(), rest)
+	for _, dir := range []*string{&c.RepoDir, &c.PluginsDir} {
+		if rest, ok := strings.CutPrefix(*dir, "~/"); ok {
+			*dir = filepath.Join(home(), rest)
+		}
 	}
 	if c.Repo == "" {
 		return c, fmt.Errorf(`no repo to watch: create %s with {"repo": "owner/name", "repo_dir": "~/code/name"}`, path)

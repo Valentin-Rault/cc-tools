@@ -101,6 +101,10 @@ type model struct {
 	lastSearch string  // what n and N look for; its matches stay highlighted until esc
 	width      int
 	height     int
+
+	plugins        []plugin
+	loadingPlugins bool
+	noticed        map[string]bool // plugins already said to be new, changed or broken, as they are now
 }
 
 type choiceKind int
@@ -141,7 +145,7 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 
 func (m *model) Init() tea.Cmd {
 	m.polling, m.linking = true, true
-	return tea.Batch(m.pollCmd(true), tick(), sessionsCmd(), m.linksCmd()) // refresh at once: the lists start empty
+	return tea.Batch(m.pollCmd(true), tick(), sessionsCmd(), m.linksCmd(), m.loadPluginsCmd()) // refresh at once: the lists start empty
 }
 
 func (m *model) pollCmd(force bool) tea.Cmd {
@@ -203,6 +207,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 
 	case pollMsg:
+		plugged := m.pollPluginEvents(msg)
 		m.polling = false
 		m.nextPoll = time.Now().Add(msg.Interval)
 		m.err = msg.Err
@@ -218,7 +223,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.events = m.events[len(m.events)-200:]
 		}
 		m.owners = m.store.Owners()
-		return m, m.dispatch()
+		return m, tea.Batch(m.dispatch(), m.runPlugins(plugged))
 
 	case tickMsg:
 		m.ticks++
@@ -237,6 +242,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ticks%60 == 0 && !m.linking {
 			m.linking = true
 			cmds = append(cmds, m.linksCmd())
+		}
+		if m.ticks%pluginReload == 0 {
+			cmds = append(cmds, m.loadPluginsCmd())
 		}
 		return m, tea.Batch(append(cmds, m.dispatch())...)
 
@@ -308,6 +316,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.owners = m.store.Owners()
 		return m, m.dispatch()
+
+	case pluginsMsg:
+		m.gotPlugins(msg)
+
+	case pluginDoneMsg:
+		m.pluginDone(msg)
 
 	case jumpMsg:
 		if msg.err != nil {
@@ -458,6 +472,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			}
 			m.flash = fmt.Sprintf("#%d has no running owner to go to", pr)
 		}
+	default:
+		return m, m.pluginKey(k)
 	}
 	return m, nil
 }

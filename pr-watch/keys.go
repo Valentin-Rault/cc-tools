@@ -79,15 +79,20 @@ func (g keyGroup) lines() []string {
 	return out
 }
 
-// overlayKeys floats the popup over the dimmed screen: two columns when it's wide enough, else one.
+// overlayKeys floats the popup over the dimmed screen: two columns when it's wide enough, else one. The plugins'
+// keys, if any, go across the bottom.
 func (m *model) overlayKeys(lines []string, w int) []string {
 	move, find, pr, watch := m.keyGroups()
-	colW := 0
-	for _, g := range []keyGroup{move, find, pr, watch} {
-		for _, l := range g.lines() {
-			colW = max(colW, ansi.StringWidth(l)+2)
+	width := func(gs ...keyGroup) int {
+		n := 0
+		for _, g := range gs {
+			for _, l := range g.lines() {
+				n = max(n, ansi.StringWidth(l)+2)
+			}
 		}
+		return n
 	}
+	colW := width(move, find, pr, watch)
 	stack := func(gs ...keyGroup) []string {
 		var out []string
 		for i, g := range gs {
@@ -98,9 +103,14 @@ func (m *model) overlayKeys(lines []string, w int) []string {
 		}
 		return out
 	}
+	plugins := keyGroup{"Plugins", m.pluginRows()}
+	var below []string
+	if len(plugins.rows) > 0 {
+		below = append([]string{""}, plugins.lines()...)
+	}
 	var inner []string
-	bw := min(w-4, 2*colW+2)
-	if bw == 2*colW+2 {
+	bw := min(w-4, max(2*colW, width(plugins))+2)
+	if 2*colW+2 <= w-4 {
 		left, right := stack(move, pr), stack(find, watch)
 		for i := range max(len(left), len(right)) {
 			l, r := "", ""
@@ -113,9 +123,10 @@ func (m *model) overlayKeys(lines []string, w int) []string {
 			inner = append(inner, cell(l, colW)+r)
 		}
 	} else {
-		bw = min(w-4, colW+2)
+		bw = min(w-4, max(colW, width(plugins))+2)
 		inner = stack(move, find, pr, watch)
 	}
+	inner = append(inner, below...)
 	title := accent.Render("Keys") + faint.Render("  ·  in "+panelNames[m.panel()])
 	box := frame(title, append(append([]string{""}, inner...), ""), bw, len(inner)+4, true)
 	return floatOver(lines, box, w, bw)

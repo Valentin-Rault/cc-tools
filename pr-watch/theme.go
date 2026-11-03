@@ -52,6 +52,8 @@ var (
 	keycap  = lipgloss.NewStyle().Background(bgHLColor).Foreground(fgColor)
 	segment = lipgloss.NewStyle().Background(bgHLColor).Foreground(fg2Color)
 	bar     = lipgloss.NewStyle().Background(bgDarkColor).Foreground(commentColor)
+	// searchHit is tokyonight's Search: what / found.
+	searchHit = lipgloss.NewStyle().Background(lipgloss.Color("#3d59a1")).Foreground(fgColor)
 )
 
 func pill(c color.Color) lipgloss.Style {

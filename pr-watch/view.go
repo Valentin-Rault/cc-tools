@@ -30,6 +30,9 @@ func (m *model) View() tea.View {
 		}
 	}
 	help := faint.Render(m.help())
+	if m.search != nil {
+		help = m.searchLine()
+	}
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
 	}
@@ -173,8 +176,17 @@ func (m *model) prRow(n, w int) string {
 	s := m.prs[strconv.Itoa(n)]
 	const railW, ciW, ownerW = 16, 28, 30
 	titleW := max(14, w-7-2-railW-2-ciW-2-ownerW)
-	return text.Render(fmt.Sprintf("#%-6d", n)) + cell(text.Render(s.Title), titleW) + "  " +
+	return m.prNumber(n, s.Title, "", text) + cell(text.Render(s.Title), titleW) + "  " +
 		cell(rail(s), railW) + "  " + cell(m.ciCell(s), ciW) + "  " + m.ownerCell(n)
+}
+
+// prNumber is a row's "#1234", 7 cells wide, highlighted when the search finds the PR.
+func (m *model) prNumber(n int, title, author string, st lipgloss.Style) string {
+	num := fmt.Sprintf("#%d", n)
+	if m.hit(n, title, author) {
+		st = searchHit
+	}
+	return st.Render(num) + strings.Repeat(" ", max(0, 7-len(num)))
 }
 
 // rail is the PR's stage: draft, in review, approved, queued. Changes requested is an orange diamond on review.
@@ -258,7 +270,7 @@ func (m *model) reviewRow(r ReviewRequest, w int) string {
 	if r.Draft {
 		title = faint.Render("draft ") + title
 	}
-	return text.Render(fmt.Sprintf("#%-6d", r.Number)) + cell(shields[r.Security], 2) + cell(title, titleW) + "  " +
+	return m.prNumber(r.Number, r.Title, r.Author, text) + cell(shields[r.Security], 2) + cell(title, titleW) + "  " +
 		cell(statusIcon(r), statusW) + "  " + cell(text2.Render(r.Author), authorW) + "  " + approvedCell(r.ApprovedBy)
 }
 
@@ -339,7 +351,7 @@ func (m *model) reviewedRow(r ReviewedPR, w int) string {
 	if r.Draft {
 		title = faint.Render("draft ") + title
 	}
-	return dimIf(text).Render(fmt.Sprintf("#%-6d", r.Number)) + cell(title, titleW) + "  " + cell(dimIf(text2).Render(r.Author), authorW) +
+	return m.prNumber(r.Number, r.Title, r.Author, dimIf(text)) + cell(title, titleW) + "  " + cell(dimIf(text2).Render(r.Author), authorW) +
 		"  " + cell(v.style.Render(v.glyph)+" "+dimIf(v.style).Render(v.label), verdictW) + "  " + cell(sinceText, sinceW) +
 		"  " + cell(comment.Render(ago(time.Since(r.ReviewedAt))), whenW) + "  " + m.ownerCell(r.Number)
 }
@@ -551,6 +563,10 @@ func (m *model) help() string {
 	if m.picker != nil {
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	}
+	move := "  ↑↓ move  / search" // early: the key help is cut on a narrow terminal
+	if m.lastSearch != "" {
+		move += "  n/N next/prev  esc clear"
+	}
 	e := map[bool]string{true: "  e close", false: "  e details"}[m.expanded]
 	switch m.panel() {
 	case panelMine:
@@ -558,13 +574,13 @@ func (m *model) help() string {
 		if prs := m.prList(); m.cursor[panelMine] < len(prs) && m.prs[strconv.Itoa(prs[m.cursor[panelMine]])].Queued {
 			q = "  m unqueue"
 		}
-		return " ←→ lists  ↑↓ move  ⏎ open" + e + q + "  o owner  s send  g go to owner  x purge  tab events" + common
+		return " ←→ lists" + move + "  ⏎ open" + e + q + "  o owner  s send  g go to owner  x purge  tab events" + common
 	case panelReview:
-		return " ←→ lists  ↑↓ move  ⏎ open for review" + e + "  tab events" + common
+		return " ←→ lists" + move + "  ⏎ open for review" + e + "  tab events" + common
 	case panelReviewed:
-		return " ←→ lists  ↑↓ move  ⏎ open what changed since your review" + e + "  tab events" + common
+		return " ←→ lists" + move + "  ⏎ open what changed since your review" + e + "  tab events" + common
 	}
-	return " ↑↓ move  ⏎ open" + e + "  o owner  s send/resend  g go to owner  tab list" + common
+	return strings.TrimPrefix(move, " ") + "  ⏎ open" + e + "  o owner  s send/resend  g go to owner  tab list" + common
 }
 
 func (m *model) waiting() int {

@@ -95,8 +95,11 @@ type model struct {
 	inList bool // focus is on that list, not on the events
 	cursor [4]int
 	picker *picker
-	width  int
-	height int
+
+	search     *search // / is open
+	lastSearch string  // what n and N look for; its matches stay highlighted until esc
+	width      int
+	height     int
 }
 
 type choiceKind int
@@ -340,6 +343,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
 		}
+		if m.search != nil {
+			m.searchKey(msg.String(), msg.Text)
+			return m, nil
+		}
 		return m.key(msg.String())
 	}
 	return m, nil
@@ -414,6 +421,12 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, m.dispatch()
 	case "x":
 		m.purge()
+	case "/":
+		m.openSearch()
+	case "n", "N":
+		m.searchAgain(k == "N")
+	case "esc":
+		m.lastSearch = ""
 	case "e":
 		m.expanded = !m.expanded
 	case "m":

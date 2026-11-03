@@ -34,8 +34,10 @@ make test
  AUTO  ● watching · next 42s   3 open   1 failing   1 queued   2 to review     1 waiting  acme/widgets
 ```
 
-It's drawn in tokyonight night on its own background, like an editor colorscheme, so it needs a terminal with true
-colour. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks,
+It's drawn on its own background, like an editor colorscheme, so it needs a terminal with true colour. `t` picks
+the theme: tokyonight (the default), catppuccin-mocha, catppuccin-latte (light), gruvbox, nord, dracula or kanagawa.
+The screen takes on the one under the cursor as you move, `⏎` keeps it and writes it to the config file as `"theme"`,
+and `esc` puts the one you had back. Each PR shows its stage (draft, in review, approved, queued; ◆ when changes were requested), its checks,
 `⚠ conflicts` when it has merge conflicts, and its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
 how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
 `security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
@@ -124,12 +126,13 @@ override it):
   "repo": "acme/widgets",
   "repo_dir": "~/code/widgets",
   "ignore": ["github-actions", "dependabot"],
-  "security_team": "security"
+  "security_team": "security",
+  "theme": "tokyonight"
 }
 ```
 
 `ignore` lists logins whose reviews and comments never need action. `security_team` is the slug of a team whose
-review some PRs need (optional). State lives in `~/.pr-watch/`
+review some PRs need (optional). `theme` is what `t` last picked. State lives in `~/.pr-watch/`
 (`PR_WATCH_DIR`); `events.log` there is the history of everything detected and sent.
 
 ### Tabs by stage

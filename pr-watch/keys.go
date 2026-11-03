@@ -59,6 +59,7 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 		{"p", pause, false},
 		{"r", "refresh now", false},
 		{"x", "forget owners and events of closed PRs", false},
+		{"t", "pick a theme: " + themeName + " now", false},
 		{"q", "quit", false},
 		{"?", "close this", false},
 	}}

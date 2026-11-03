@@ -106,6 +106,8 @@ type model struct {
 	plugins        []plugin
 	loadingPlugins bool
 	noticed        map[string]bool // plugins already said to be new, changed or broken, as they are now
+
+	themePick *themePicker // t is open
 }
 
 type choiceKind int
@@ -135,6 +137,9 @@ func newModel(cfg Config, store Store, w *Watcher, sender *Sender) *model {
 	m := &model{cfg: cfg, store: store, w: w, sender: sender, linkIdx: newLinkIndex(cfg.Repo), prs: w.snap,
 		owners: store.Owners(), inflight: map[int]bool{}, auto: true, hotUntil: store.HotUntil(), inList: true,
 		leftAt: now, backAt: now, seenAt: now}
+	if cfg.Theme != "" && !useTheme(cfg.Theme) {
+		m.flash = fmt.Sprintf("no theme %q in the config: t picks one of %s", cfg.Theme, strings.Join(themeNames(), ", "))
+	}
 	for _, e := range store.Pending() {
 		if e.Status == Sending { // the TUI quit mid-send; whether it arrived is unknown
 			e.Status, e.Note = Failed, "interrupted: pr-watch quit while sending"
@@ -373,6 +378,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
 		}
+		if m.themePick != nil {
+			m.themeKey(msg.String())
+			return m, nil
+		}
 		if m.showKeys { // only closing it: q there mustn't quit
 			switch msg.String() {
 			case "?", "esc", "q", "ctrl+c":
@@ -460,6 +469,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		m.purge()
 	case "?":
 		m.showKeys = true
+	case "t":
+		m.openThemes()
 	case "/":
 		m.openSearch()
 	case "n", "N":

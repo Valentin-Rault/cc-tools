@@ -26,6 +26,9 @@ type Config struct {
 	Notify bool `json:"notify"`
 	// PluginsDir holds the plugins, a folder each (plugin.go); plugins beside this config by default.
 	PluginsDir string `json:"plugins_dir"`
+	// Theme is the colorscheme, one of themes (theme.go); t picks one and writes it here.
+	Theme string `json:"theme"`
+	File  string `json:"-"` // where the config was read from
 }
 
 func configPath() string {
@@ -37,7 +40,7 @@ func configPath() string {
 
 func loadConfig() (Config, error) {
 	path := configPath()
-	c := Config{Ignore: []string{"github-actions", "dependabot"},
+	c := Config{Ignore: []string{"github-actions", "dependabot"}, File: path,
 		TabsPlugin: filepath.Join(home(), ".config/zellij/plugins/pr-watch-tabs.wasm"), PluginsDir: filepath.Join(filepath.Dir(path), "plugins")}
 	b, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {

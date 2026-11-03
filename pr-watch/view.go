@@ -33,7 +33,7 @@ func (m *model) View() tea.View {
 	switch {
 	case m.search != nil:
 		help = m.searchLine()
-	case m.picker == nil && !m.showKeys: // the clue to every other key
+	case m.picker == nil && !m.showKeys && m.themePick == nil: // the clue to every other key
 		help += "  " + blue.Render("?") + faint.Render(" all keys")
 	}
 	if m.picker != nil {
@@ -41,6 +41,9 @@ func (m *model) View() tea.View {
 	}
 	if m.showKeys {
 		lines = m.overlayKeys(lines, w)
+	}
+	if m.themePick != nil {
+		lines = m.overlayThemes(lines, w)
 	}
 	lines = append(lines, help, m.statusLine(w))
 	if len(lines) > h { // a short terminal: cut the panels, keep the key help and status line
@@ -262,10 +265,19 @@ func (m *model) ownerCell(pr int) string {
 	return red.Render("○") + text.Render(" "+owner.Name) + faint.Render(" (not running)")
 }
 
-// Shield icons from Nerd Fonts (Ghostty ships them): the security team's review is pending, approved, or asked for
+// shield is a Nerd Fonts icon (Ghostty ships them): the security team's review is pending, approved, or asked for
 // changes.
-var shields = map[string]string{"requested": text2.Render("\U000F0498"), "approved": green.Render("\U000F0565"),
-	"changes": orange.Render("\U000F0ECB")}
+func shield(review string) string {
+	switch review {
+	case "requested":
+		return text2.Render("\U000F0498")
+	case "approved":
+		return green.Render("\U000F0565")
+	case "changes":
+		return orange.Render("\U000F0ECB")
+	}
+	return ""
+}
 
 // reviewRow keeps what matters at a glance: the security shield, the PR's status, who else approved it. How long
 // it waited and its size are in the details (e).
@@ -276,7 +288,7 @@ func (m *model) reviewRow(r ReviewRequest, w int) string {
 	if r.Draft {
 		title = faint.Render("draft ") + title
 	}
-	return m.prNumber(r.Number, r.Title, r.Author, text) + cell(shields[r.Security], 2) + cell(title, titleW) + "  " +
+	return m.prNumber(r.Number, r.Title, r.Author, text) + cell(shield(r.Security), 2) + cell(title, titleW) + "  " +
 		cell(statusIcon(r), statusW) + "  " + cell(text2.Render(r.Author), authorW) + "  " + approvedCell(r.ApprovedBy)
 }
 
@@ -313,12 +325,13 @@ func sizeBar(lines int) string {
 	return blue.Render(strings.Repeat("▰", k)) + gutter.Render(strings.Repeat("▱", 5-k))
 }
 
+// verdicts and kinds point at the styles, so they follow the theme.
 var verdicts = map[string]struct {
 	glyph, label string
-	style        lipgloss.Style
+	style        *lipgloss.Style
 }{
-	"APPROVED": {"✓", "approved", green}, "CHANGES_REQUESTED": {"◆", "changes requested", orange},
-	"COMMENTED": {"◇", "commented", blue}, "DISMISSED": {"·", "dismissed", comment},
+	"APPROVED": {"✓", "approved", &green}, "CHANGES_REQUESTED": {"◆", "changes requested", &orange},
+	"COMMENTED": {"◇", "commented", &blue}, "DISMISSED": {"·", "dismissed", &comment},
 }
 
 // reviewedRow: your verdict, what happened since your review, when you reviewed, and the session reviewing it.
@@ -358,7 +371,7 @@ func (m *model) reviewedRow(r ReviewedPR, w int) string {
 		title = faint.Render("draft ") + title
 	}
 	return m.prNumber(r.Number, r.Title, r.Author, dimIf(text)) + cell(title, titleW) + "  " + cell(dimIf(text2).Render(r.Author), authorW) +
-		"  " + cell(v.style.Render(v.glyph)+" "+dimIf(v.style).Render(v.label), verdictW) + "  " + cell(sinceText, sinceW) +
+		"  " + cell(v.style.Render(v.glyph)+" "+dimIf(*v.style).Render(v.label), verdictW) + "  " + cell(sinceText, sinceW) +
 		"  " + cell(comment.Render(ago(time.Since(r.ReviewedAt))), whenW) + "  " + m.ownerCell(r.Number)
 }
 
@@ -371,13 +384,13 @@ func plural(n int, one, many string) string {
 
 var kinds = map[string]struct {
 	glyph string
-	style lipgloss.Style
+	style *lipgloss.Style
 }{
-	"ci-failed": {"✗", red}, "changes-requested": {"◆", orange}, "review": {"◇", blue},
-	"comment": {"✎", cyan}, "left-merge-queue": {"↩", yellow}, "conflicts": {"⚠", orange},
-	"reply": {"↳", cyan}, "pushed": {"↑", yellow}, "asked-again": {"↻", yellow}, // on PRs you reviewed
-	"approved": {"✓", green},
-	"merged":   {"✔", accent}, "closed": {"⊘", text2}, // the last message to a session that's done
+	"ci-failed": {"✗", &red}, "changes-requested": {"◆", &orange}, "review": {"◇", &blue},
+	"comment": {"✎", &cyan}, "left-merge-queue": {"↩", &yellow}, "conflicts": {"⚠", &orange},
+	"reply": {"↳", &cyan}, "pushed": {"↑", &yellow}, "asked-again": {"↻", &yellow}, // on PRs you reviewed
+	"approved": {"✓", &green},
+	"merged":   {"✔", &accent}, "closed": {"⊘", &text2}, // the last message to a session that's done
 }
 
 // eventRows lays the events out newest first, under a line per day, with a line under the new ones saying since
@@ -420,7 +433,7 @@ func (m *model) eventRow(e Event, w int, fresh bool) string {
 	kind, rest, _ := strings.Cut(text0, " ")
 	k, ok := kinds[kind]
 	if !ok {
-		k.glyph, k.style = "•", text2
+		k.glyph, k.style = "•", &text2
 	}
 	done := (e.Status == Sent || e.Status == ForYou) && !fresh
 	dimIf := func(s lipgloss.Style) lipgloss.Style {
@@ -434,7 +447,7 @@ func (m *model) eventRow(e Event, w int, fresh bool) string {
 		rail = blue.Render(" ✦ ")
 	}
 	left := comment.Render(e.At.Local().Format("15:04")) + rail + k.style.Render(k.glyph) + " " +
-		dimIf(text2).Render(fmt.Sprintf("#%-6d", e.PR)) + dimIf(k.style).Render(kind)
+		dimIf(text2).Render(fmt.Sprintf("#%-6d", e.PR)) + dimIf(*k.style).Render(kind)
 	if rest != "" {
 		left += dimIf(text).Render(" " + rest)
 	}
@@ -554,19 +567,30 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 
 // floatOver dims the screen and lays box, bw wide, over it: centred, near the top.
 func floatOver(lines, box []string, w, bw int) []string {
-	x, y := (w-bw)/2, min(3, max(0, len(lines)-len(box)))
 	out := make([]string, len(lines))
 	for i, l := range lines {
-		out[i] = gutter.Render(ansi.Strip(l))
+		out[i] = gutter.Render(pad(ansi.Strip(l), w))
 	}
+	return floatOn(out, box, w, bw)
+}
+
+// floatOverClear lays box over the screen as it is: the theme picker shows the screen in each theme.
+func floatOverClear(lines, box []string, w, bw int) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = pad(l, w)
+	}
+	return floatOn(out, box, w, bw)
+}
+
+func floatOn(lines, box []string, w, bw int) []string {
+	x, y := (w-bw)/2, min(3, max(0, len(lines)-len(box)))
 	for i, b := range box {
-		if y+i >= len(out) {
-			break
+		if y+i < len(lines) {
+			lines[y+i] = ansi.Truncate(lines[y+i], x, "") + b + ansi.TruncateLeft(lines[y+i], x+bw, "")
 		}
-		plain := pad(ansi.Strip(lines[y+i]), w)
-		out[y+i] = gutter.Render(ansi.Truncate(plain, x, "")) + b + gutter.Render(ansi.TruncateLeft(plain, x+bw, ""))
 	}
-	return out
+	return lines
 }
 
 // help is the short key help under the lists: what ⏎ does there, and search; ? shows every key.
@@ -576,6 +600,8 @@ func (m *model) help() string {
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	case m.showKeys:
 		return " ? or esc close"
+	case m.themePick != nil:
+		return " ↑↓ try one  ⏎ keep it  esc put " + m.themePick.was + " back"
 	}
 	enter := map[int]string{panelMine: "open", panelReview: "open for review", panelReviewed: "open what changed since your review",
 		panelEvents: "open"}[m.panel()]
@@ -647,7 +673,7 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 			reviews = append(reviews, green.Render("✓")+text2.Render(" "+who+" approved"))
 		}
 		if r.Security != "" {
-			reviews = append(reviews, shields[r.Security]+text2.Render(" "+m.cfg.SecurityTeam+" "+
+			reviews = append(reviews, shield(r.Security)+text2.Render(" "+m.cfg.SecurityTeam+" "+
 				map[string]string{"requested": "to review", "approved": "approved", "changes": "requested changes"}[r.Security]))
 		}
 		if len(reviews) == 0 {

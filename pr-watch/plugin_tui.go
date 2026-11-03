@@ -28,7 +28,7 @@ type (
 // builtinKeys are pr-watch's own keys: they always win over a plugin's. key() is the authority; this list is what
 // the ? popup tells plugin authors.
 var builtinKeys = []string{"q", "ctrl+c", "left", "h", "right", "l", "tab", "shift+tab", "up", "k", "down", "j", "enter",
-	"r", "p", "a", "x", "?", "/", "n", "N", "esc", "e", "m", "o", "s", "g"}
+	"r", "p", "a", "x", "?", "/", "n", "N", "esc", "e", "m", "o", "s", "g", "t"}
 
 func (m *model) loadPluginsCmd() tea.Cmd {
 	if m.cfg.PluginsDir == "" || m.loadingPlugins {

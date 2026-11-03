@@ -6,13 +6,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
 // The hook: Claude Code runs `cc-status hook` on its events, with the event as JSON on stdin. It records the
-// session's state, and refreshes the badges on the zellij session's tab names.
+// session's state, and refreshes the badges on the tab names of its zellij session or tmux server.
 
 type hookEvent struct {
 	SessionID            string          `json:"session_id"`
@@ -121,10 +122,9 @@ func classify(p hookEvent) (st, kind, detail string, ok bool) {
 }
 
 func cmdHook(stdin io.Reader) {
-	session, pane := os.Getenv("ZELLIJ_SESSION_NAME"), os.Getenv("ZELLIJ_PANE_ID")
-	paneID, err := strconv.Atoi(pane)
-	if session == "" || err != nil || paneID < 0 {
-		return // claude isn't running inside zellij
+	srv, paneID, ok := mux.Here()
+	if !ok || paneID < 0 {
+		return // claude isn't running in a zellij or tmux pane
 	}
 	b, _ := io.ReadAll(stdin)
 	var p hookEvent
@@ -139,7 +139,7 @@ func cmdHook(stdin io.Reader) {
 	}
 	if p.Event == "SessionEnd" {
 		withLock("state", func() { dropState(p.SessionID) })
-		refreshBadges(session)
+		refreshBadges(srv)
 		return
 	}
 	st, kind, detail, ok := classify(p)
@@ -147,18 +147,18 @@ func cmdHook(stdin io.Reader) {
 		return
 	}
 	current, _ := readState(p.SessionID)
-	samePane := current.Zellij == session && current.Pane == paneID
+	samePane := current.server() == srv && current.Pane == paneID
 	if samePane && current.State == st && p.Event != "SessionStart" {
 		return // most tool events end here
 	}
-	if st == done && paneInView(session, paneID) {
+	if st == done && paneInView(srv, paneID) {
 		st, kind = idle, "idle" // you are looking at it
 	}
 	withLock("state", func() {
 		current, _ := readState(p.SessionID)
 		keepPid := samePane && p.Event != "SessionStart" && pidAlive(current.pid())
-		next := state{SessionID: p.SessionID, State: st, Kind: kind, Detail: detail, Since: now(), Zellij: session,
-			Pane: paneID, Cwd: p.Cwd}
+		next := state{SessionID: p.SessionID, State: st, Kind: kind, Detail: detail, Since: now(), Pane: paneID, Cwd: p.Cwd}
+		next.setServer(srv)
 		if next.Cwd == "" {
 			next.Cwd = current.Cwd
 		}
@@ -171,7 +171,7 @@ func cmdHook(stdin io.Reader) {
 			logf("hook: %v", err)
 		}
 	})
-	refreshBadges(session)
+	refreshBadges(srv)
 	if st == done {
 		spawn("watch")
 	}

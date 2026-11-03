@@ -61,19 +61,19 @@ func (z zellijMux) Jump(zsession, pane string) error {
 				return err
 			}
 		}
-		playCue(zsession, pane)
+		playCue(Zellij(zsession), pane)
 		return nil
 	}
 	return fmt.Errorf("pane %s not found in zellij session %s", pane, zsession)
 }
 
 // playCue has cc-status glow the pane just jumped to and animate its title. Without cc-status the jump is just quiet.
-func playCue(zsession, pane string) {
+var playCue = func(s Server, pane string) {
 	bin, err := exec.LookPath("cc-status")
 	if err != nil {
 		return
 	}
-	cmd := exec.Command(bin, "cue", zsession, pane)
+	cmd := exec.Command(bin, "cue", s.String(), pane)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // finishes even when pr-watch quits right after the jump
 	if cmd.Start() == nil {
 		go cmd.Wait()
@@ -104,7 +104,7 @@ func (z zellijMux) OpenTab(title, dir string, argv []string) error {
 func (z zellijMux) Locate(pids []int) map[int]Spot {
 	spots := map[int]Spot{}
 	type layout struct {
-		panes   map[int]ZellijPane
+		panes   map[int]zellijPane
 		focused map[int]bool
 	}
 	layouts := map[string]*layout{}
@@ -116,8 +116,8 @@ func (z zellijMux) Locate(pids []int) map[int]Spot {
 		l, ok := layouts[zs]
 		if !ok {
 			l = &layout{}
-			l.panes, _ = ZellijPanes(zs)
-			l.focused, _ = ZellijFocused(zs)
+			l.panes, _ = zellijPanes(zs)
+			l.focused, _ = zellijFocused(zs)
 			layouts[zs] = l
 		}
 		id, _ := strconv.Atoi(pane)
@@ -128,8 +128,8 @@ func (z zellijMux) Locate(pids []int) map[int]Spot {
 	return spots
 }
 
-// ZellijPane is a terminal pane as zellij lists it.
-type ZellijPane struct {
+// zellijPane is a terminal pane as zellij lists it.
+type zellijPane struct {
 	ID          int    `json:"id"`
 	IsPlugin    bool   `json:"is_plugin"`
 	IsFloating  bool   `json:"is_floating"`
@@ -141,17 +141,17 @@ type ZellijPane struct {
 	Cwd         string `json:"pane_cwd"`
 }
 
-// ZellijPanes is the terminal panes of a zellij session, by ID; plugins left out.
-func ZellijPanes(session string) (map[int]ZellijPane, error) {
+// zellijPanes is the terminal panes of a zellij session, by ID; plugins left out.
+func zellijPanes(session string) (map[int]zellijPane, error) {
 	out, err := zellij(session, "list-panes", "--all", "--json")
 	if err != nil {
 		return nil, err
 	}
-	var all []ZellijPane
+	var all []zellijPane
 	if err := json.Unmarshal([]byte(out), &all); err != nil {
 		return nil, fmt.Errorf("zellij list-panes: %w", err)
 	}
-	panes := map[int]ZellijPane{}
+	panes := map[int]zellijPane{}
 	for _, p := range all {
 		if !p.IsPlugin {
 			panes[p.ID] = p
@@ -160,26 +160,26 @@ func ZellijPanes(session string) (map[int]ZellijPane, error) {
 	return panes, nil
 }
 
-// ZellijTab is a tab as zellij lists it.
-type ZellijTab struct {
+// zellijTab is a tab as zellij lists it.
+type zellijTab struct {
 	TabID int    `json:"tab_id"`
 	Name  string `json:"name"`
 }
 
-func ZellijTabs(session string) ([]ZellijTab, error) {
+func zellijTabs(session string) ([]zellijTab, error) {
 	out, err := zellij(session, "list-tabs", "--json")
 	if err != nil {
 		return nil, err
 	}
-	var tabs []ZellijTab
+	var tabs []zellijTab
 	if err := json.Unmarshal([]byte(out), &tabs); err != nil {
 		return nil, fmt.Errorf("zellij list-tabs: %w", err)
 	}
 	return tabs, nil
 }
 
-// ZellijFocused is the terminal panes an attached client has focused.
-func ZellijFocused(session string) (map[int]bool, error) {
+// zellijFocused is the terminal panes an attached client has focused.
+func zellijFocused(session string) (map[int]bool, error) {
 	out, err := zellij(session, "list-clients")
 	if err != nil {
 		return nil, err
@@ -195,11 +195,8 @@ func ZellijFocused(session string) (map[int]bool, error) {
 	return focused, nil
 }
 
-// ZellijAction runs `zellij --session <session> action <args>`.
-func ZellijAction(session string, args ...string) (string, error) { return zellij(session, args...) }
-
-// ZellijBin is zellij's path: on PATH, else where Homebrew puts it, for hooks that run with a short PATH.
-func ZellijBin() string {
+// zellijBin is zellij's path: on PATH, else where Homebrew puts it, for hooks that run with a short PATH.
+func zellijBin() string {
 	if p, err := exec.LookPath("zellij"); err == nil {
 		return p
 	}
@@ -269,7 +266,7 @@ func tabIDs(zellijSession string) map[string]int {
 func zellij(session string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ZellijBin(), append([]string{"--session", session, "action"}, args...)...)
+	cmd := exec.CommandContext(ctx, zellijBin(), append([]string{"--session", session, "action"}, args...)...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

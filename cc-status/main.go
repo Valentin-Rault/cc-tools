@@ -1,4 +1,4 @@
-// cc-status shows which Claude Code sessions in your zellij panes need you, and jumps to them.
+// cc-status shows which Claude Code sessions in your zellij or tmux panes need you, and jumps to them.
 package main
 
 import (
@@ -12,9 +12,9 @@ import (
 	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
-const usage = `cc-status: which Claude Code sessions in your zellij panes need you.
+const usage = `cc-status: which Claude Code sessions in your zellij or tmux panes need you.
 
-  cc-status ui      overview to pick a session and jump to it (meant for a floating zellij pane)
+  cc-status ui      overview to pick a session and jump to it (meant for a floating zellij pane, a tmux popup)
   cc-status list    print the overview once
   cc-status hook    Claude Code hook entry point, reads the event JSON on stdin
   cc-status watch   internal: clears a ✓ once you have visited its pane (the hook starts it)
@@ -76,7 +76,7 @@ func cmdCue(args []string) {
 		logf("cue: pane %q", args[1])
 		return
 	}
-	if err := playCues(args[0], pane, cueNames()); err != nil {
+	if err := playCues(mux.ParseServer(args[0]), pane, cueNames()); err != nil {
 		logf("cue: %v", err)
 	}
 }
@@ -86,9 +86,9 @@ func cmdDemo(args []string) {
 		fmt.Fprintf(os.Stderr, "cc-status demo: "+format+"\n", a...)
 		os.Exit(1)
 	}
-	session := os.Getenv("ZELLIJ_SESSION_NAME")
-	if session == "" {
-		fail("run it inside zellij")
+	srv, _, ok := mux.Here()
+	if !ok {
+		fail("run it inside zellij or tmux")
 	}
 	picked := "all"
 	jumpFirst := false
@@ -109,11 +109,11 @@ func cmdDemo(args []string) {
 			fail("pick from %s, or all", strings.Join(cueNames(), ", "))
 		}
 	}
-	panes, err := mux.ZellijPanes(session)
+	panes, err := srv.Panes()
 	if err != nil {
 		fail("%v", err)
 	}
-	focused, err := mux.ZellijFocused(session)
+	focused, err := srv.Focused()
 	if err != nil {
 		fail("%v", err)
 	}
@@ -127,9 +127,9 @@ func cmdDemo(args []string) {
 	target, ok := panes[here]
 	ok = ok && found
 	if jumpFirst {
-		var others, claudes []mux.ZellijPane
+		var others, claudes []mux.Pane
 		for _, p := range panes {
-			if p.ID != here && !p.IsFloating {
+			if p.ID != here && !p.Floating {
 				others = append(others, p)
 				if runsClaude(p) {
 					claudes = append(claudes, p)
@@ -143,18 +143,15 @@ func cmdDemo(args []string) {
 			others = claudes
 		}
 		target, ok = others[rand.IntN(len(others))], true
-		if _, err := mux.ZellijAction(session, "go-to-tab-by-id", itoa(target.TabID)); err != nil {
-			fail("%v", err)
-		}
-		if _, err := mux.ZellijAction(session, "focus-pane-id", "terminal_"+itoa(target.ID)); err != nil {
+		if err := srv.Focus(target); err != nil {
 			fail("%v", err)
 		}
 	}
 	if !ok {
 		fail("found no focused pane")
 	}
-	fmt.Printf("%s on terminal_%d in %s\n", strings.Join(names, " + "), target.ID, mux.TabBase(target.TabName))
-	if err := playCues(session, target.ID, names); err != nil {
+	fmt.Printf("%s on %s in %s\n", strings.Join(names, " + "), srv.PaneName(target.ID), mux.TabBase(target.TabName))
+	if err := playCues(srv, target.ID, names); err != nil {
 		fail("%v", err)
 	}
 }

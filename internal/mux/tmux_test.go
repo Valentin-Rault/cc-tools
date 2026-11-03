@@ -55,6 +55,10 @@ func windowOf(t *testing.T, socket, pane string) string {
 // tmux finds the panes processes run in, moves them to another window, opens new ones and jumps to one.
 func TestTmux(t *testing.T) {
 	where, panes, pids := tmuxServer(t)
+	var cues []string
+	was := playCue
+	playCue = func(s Server, pane string) { cues = append(cues, s.String()+" "+pane) }
+	t.Cleanup(func() { playCue = was })
 	tm := tmuxMux{socket: where, pane: panes["a"]} // the caller runs in a
 	if _, pane, ok := tm.Pane(pids["a"]); !ok || pane != panes["a"] {
 		t.Fatalf("pane of a: %q %v", pane, ok)
@@ -129,6 +133,9 @@ func TestTmux(t *testing.T) {
 	}
 	if got, _ := tmux(where, "display-message", "-p", "-t", panes["b"], "#{window_active}#{pane_active}"); got != "11" {
 		t.Errorf("after the jump, b's window and pane active: %q", got)
+	}
+	if want := "tmux:" + where + " " + strings.TrimPrefix(panes["b"], "%"); len(cues) != 1 || cues[0] != want {
+		t.Errorf("cues %q, want %q", cues, want)
 	}
 	if err := tm.Jump("/elsewhere", "%1"); err == nil {
 		t.Error("jumped to another tmux server")

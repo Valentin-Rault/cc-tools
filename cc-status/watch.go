@@ -26,18 +26,18 @@ func cmdWatch() {
 	}
 	defer unlock()
 	type key struct {
-		session string
-		pane    int
+		srv  mux.Server
+		pane int
 	}
 	streaks, rounds := map[key]int{}, 0
 	for {
-		pending := map[string]map[int]bool{}
+		pending := map[mux.Server]map[int]bool{}
 		for _, st := range loadStates() {
 			if st.State == done {
-				if pending[st.Zellij] == nil {
-					pending[st.Zellij] = map[int]bool{}
+				if pending[st.server()] == nil {
+					pending[st.server()] = map[int]bool{}
 				}
-				pending[st.Zellij][st.Pane] = true
+				pending[st.server()][st.Pane] = true
 			}
 		}
 		if len(pending) == 0 {
@@ -51,13 +51,13 @@ func cmdWatch() {
 				}
 			}()
 			rounds++
-			if rounds%60 == 0 { // forget sessions whose claude or zellij went away
-				for session := range pending {
-					if panes, err := mux.ZellijPanes(session); err == nil {
-						liveStates(session, panes)
+			if rounds%60 == 0 { // forget sessions whose claude or multiplexer went away
+				for srv := range pending {
+					if panes, err := srv.Panes(); err == nil {
+						liveStates(srv, panes)
 					} else {
 						for _, st := range loadStates() {
-							if st.Zellij == session && !pidAlive(st.pid()) {
+							if st.server() == srv && !pidAlive(st.pid()) {
 								dropState(st.SessionID)
 							}
 						}
@@ -66,10 +66,10 @@ func cmdWatch() {
 			}
 			focused := map[key]bool{}
 			if front {
-				for session := range pending {
-					if fs, err := mux.ZellijFocused(session); err == nil {
+				for srv := range pending {
+					if fs, err := srv.Focused(); err == nil {
 						for pane := range fs {
-							focused[key{session, pane}] = true
+							focused[key{srv, pane}] = true
 						}
 					}
 				}
@@ -79,15 +79,15 @@ func cmdWatch() {
 				next[k] = streaks[k] + 1
 			}
 			streaks = next
-			for session, panes := range pending {
+			for srv, panes := range pending {
 				visited := map[int]bool{}
 				for pane := range panes {
-					if streaks[key{session, pane}] >= watchDwell {
+					if streaks[key{srv, pane}] >= watchDwell {
 						visited[pane] = true
 					}
 				}
-				if len(visited) > 0 && markSeen(session, visited) {
-					refreshBadges(session)
+				if len(visited) > 0 && markSeen(srv, visited) {
+					refreshBadges(srv)
 				}
 			}
 		}()
@@ -165,9 +165,9 @@ func glowColor(base, tint [3]int, level float64) string {
 }
 
 // cueGlow: the pane's background breathes toward the tint and back, with no hard edge on either side.
-func cueGlow(session string, pane mux.ZellijPane) error {
-	target, base, tint, strength := "terminal_"+itoa(pane.ID), hexRGB(terminalBg()), hexRGB(glowTint()), glowStrength()
-	defer mux.ZellijAction(session, "set-pane-color", "-p", target, "--reset")
+func cueGlow(srv mux.Server, pane mux.Pane) error {
+	base, tint, strength := hexRGB(terminalBg()), hexRGB(glowTint()), glowStrength()
+	defer srv.ResetBackground(pane.ID)
 	shown := ""
 	return timeline(glowSeconds, 40, func(t float64) error {
 		level := strength * (1 - smoothstep((t-0.2)/0.8))
@@ -175,7 +175,7 @@ func cueGlow(session string, pane mux.ZellijPane) error {
 			level = strength * smoothstep(t/0.2)
 		}
 		if c := glowColor(base, tint, level); c != shown {
-			if _, err := mux.ZellijAction(session, "set-pane-color", "-p", target, "--bg", c); err != nil {
+			if err := srv.SetBackground(pane.ID, c); err != nil {
 				return err
 			}
 			shown = c
@@ -190,14 +190,14 @@ var (
 	titleTwinkle = [][2]string{{"  ✦", "✦  "}, {"  ✧", "✧  "}, {"  ✦", "✦  "}}
 )
 
-// cueTitle: chevrons sweep in toward the pane's frame title three times, then it twinkles.
-func cueTitle(session string, pane mux.ZellijPane) error {
-	target := "terminal_" + itoa(pane.ID)
+// cueTitle: chevrons sweep in toward the pane's frame title three times, then it twinkles. tmux shows a pane's title
+// only with pane-border-status on.
+func cueTitle(srv mux.Server, pane mux.Pane) error {
 	title := strings.TrimSpace(titlePrefix.ReplaceAllString(pane.Title, ""))
 	if title == "" {
 		title = "claude"
 	}
-	defer mux.ZellijAction(session, "undo-rename-pane", "-p", target)
+	defer srv.RestoreTitle(pane.ID, pane.Title)
 	type frame struct {
 		sides [2]string
 		pause time.Duration
@@ -212,7 +212,7 @@ func cueTitle(session string, pane mux.ZellijPane) error {
 		frames = append(frames, frame{f, 150 * time.Millisecond})
 	}
 	for _, f := range frames {
-		if _, err := mux.ZellijAction(session, "rename-pane", "-p", target, f.sides[0]+" "+title+" "+f.sides[1]); err != nil {
+		if err := srv.SetTitle(pane.ID, f.sides[0]+" "+title+" "+f.sides[1]); err != nil {
 			return err
 		}
 		time.Sleep(f.pause)
@@ -222,7 +222,7 @@ func cueTitle(session string, pane mux.ZellijPane) error {
 
 var cues = []struct {
 	name string
-	play func(string, mux.ZellijPane) error
+	play func(mux.Server, mux.Pane) error
 }{{"glow", cueGlow}, {"title", cueTitle}}
 
 func cueNames() []string {
@@ -234,8 +234,8 @@ func cueNames() []string {
 }
 
 // playCues plays these cues on the pane at once. Each undoes its own changes when it ends, even on an error.
-func playCues(session string, paneID int, names []string) error {
-	panes, err := mux.ZellijPanes(session)
+func playCues(srv mux.Server, paneID int, names []string) error {
+	panes, err := srv.Panes()
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func playCues(session string, paneID int, names []string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := c.play(session, pane); err != nil {
+			if err := c.play(srv, pane); err != nil {
 				logf("cue %s: %v", c.name, err)
 				fmt.Fprintf(os.Stderr, "cc-status: cue %s: %v\n", c.name, err)
 			}

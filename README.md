@@ -5,12 +5,12 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 | tool | what it does |
 |---|---|
 | [`pr-watch`](#pr-watch) | A TUI that watches your open GitHub PRs and hands each CI failure, review and comment to the Claude session that owns the PR. |
-| [`cc-status`](#cc-status) | Shows which Claude sessions in your zellij panes need you, and jumps to them. |
+| [`cc-status`](#cc-status) | Shows which Claude sessions in your zellij or tmux panes need you, and jumps to them. |
 | [`hooks/pr-guard.sh`](#pr-guard) | A Claude Code hook that keeps merging your call: Claude can't merge, enqueue or enable auto-merge. |
 
 macOS, Claude Code, `gh` (logged in), `git`, `jq`, and Go 1.24+ to build pr-watch. pr-watch runs in any terminal;
 a few of its features need zellij 0.45+ or tmux 3.0+ ([which](#in-zellij-tmux-or-neither)), and in zellij, Rust with
-the `wasm32-wasip1` target to build its plugin (`make install` skips it without `cargo`). cc-status needs zellij.
+the `wasm32-wasip1` target to build its plugin (`make install` skips it without `cargo`). cc-status needs zellij or tmux.
 
 ```sh
 make install   # builds pr-watch into ~/.claude/pr-watch/ and links it and cc-status into ~/.local/bin, pr-guard into ~/.claude/hooks
@@ -255,13 +255,13 @@ pr-watch plugins allow confetti        # pr-watch plugins deny confetti stops it
 
 ## cc-status
 
-Which Claude Code sessions in your zellij panes need you: ● needs you (permission, question, plan approval),
-✓ finished and not visited yet, ◐ working. It's driven by Claude Code hooks, and shares its zellij code with
-pr-watch (`internal/mux`). `cc-status/cc-status.py` is the earlier Python version, kept for now: it reads and writes
+Which Claude Code sessions in your zellij or tmux panes need you: ● needs you (permission, question, plan approval),
+✓ finished and not visited yet, ◐ working. It's driven by Claude Code hooks, and shares its zellij and tmux code
+with pr-watch (`internal/mux`). `cc-status/cc-status.py` is the earlier Python version, kept for now: it reads and writes
 the same state files, so linking it to `~/.local/bin/cc-status` switches back.
 
 ```sh
-cc-status ui     # pick a session and jump to it; meant for a floating zellij pane
+cc-status ui     # pick a session and jump to it; meant for a floating zellij pane or a tmux popup
 cc-status list   # print the overview once
 ```
 
@@ -273,11 +273,26 @@ Hook it into `~/.claude/settings.json` (async, so it never slows Claude down) fo
 { "hooks": [{ "type": "command", "command": "~/.local/bin/cc-status", "args": ["hook"], "timeout": 10, "async": true }] }
 ```
 
-and bind the popup in zellij's `config.kdl`:
+and bind the popup in zellij's `config.kdl`, or in `.tmux.conf`:
 
 ```kdl
 bind "Super Shift a" { Run "cc-status" "ui" { floating true; close_on_exit true; }; }
 ```
+
+```tmux
+bind-key A display-popup -E -w 80% -h 60% cc-status ui
+```
+
+In tmux, the badges go in each window's `@cc_status` option, and on the name of a window someone named. A window tmux
+names itself (its `automatic-rename`) keeps its name: renaming it would stop tmux naming it. To see the badges on
+every window, add the option to your status line:
+
+```tmux
+set -g window-status-format         '#I:#W#{?@cc_status, #{@cc_status},}'
+set -g window-status-current-format '#I:#W#{?@cc_status, #{@cc_status},}'
+```
+
+The jump's title cue shows in tmux only with `pane-border-status` on; the glow shows either way.
 
 `CC_STATUS_BADGES=0` stops it appending ●✓◐ to tab names; `CC_STATUS_TINT` and `CC_STATUS_GLOW` style the
 focus glow. pr-watch's `g` plays the same cue when it jumps to a PR's owner.

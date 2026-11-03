@@ -10,15 +10,15 @@ import (
 	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
-// cc-status's view of zellij: which sessions still run in a pane, the badges on tab names, and whether you're
-// looking at a pane.
+// cc-status's view of the multiplexer, zellij or tmux: which sessions still run in a pane, the badges on tab names,
+// and whether you're looking at a pane.
 
 var terminalApps = []string{"Ghostty", "iTerm2", "Terminal", "WezTerm", "kitty", "Alacritty", "Warp"}
 
 // tabBadges: CC_STATUS_BADGES=0 stops cc-status appending ●✓◐ to tab names.
 func tabBadges() bool { return os.Getenv("CC_STATUS_BADGES") != "0" }
 
-// terminalFrontmost: focus inside zellij only counts as a visit while the terminal app is in front. Without lsappinfo
+// terminalFrontmost: focus inside the multiplexer only counts as a visit while the terminal app is in front. Without lsappinfo
 // (not macOS) it's taken as yes.
 var terminalFrontmost = func() bool {
 	if _, err := lookPath("lsappinfo"); err != nil {
@@ -32,23 +32,23 @@ var terminalFrontmost = func() bool {
 	return m != nil && slices.Contains(terminalApps, m[1])
 }
 
-func paneInView(session string, pane int) bool {
-	focused, err := mux.ZellijFocused(session)
+func paneInView(srv mux.Server, pane int) bool {
+	focused, err := srv.Focused()
 	return err == nil && focused[pane] && terminalFrontmost()
 }
 
-func runsClaude(p mux.ZellijPane) bool {
+func runsClaude(p mux.Pane) bool {
 	command, _, _ := strings.Cut(p.Command, " ")
 	return filepath.Base(command) == "claude"
 }
 
-// liveStates is the zellij session's states whose claude process and pane still exist, the newest per pane.
-// Everything else is deleted.
-func liveStates(session string, panes map[int]mux.ZellijPane) []state {
+// liveStates is the server's states whose claude process and pane still exist, the newest per pane. Everything else
+// is deleted.
+func liveStates(srv mux.Server, panes map[int]mux.Pane) []state {
 	newest := map[int]state{}
 	var order []int
 	for _, st := range loadStates() {
-		if st.Zellij != session {
+		if st.server() != srv {
 			continue
 		}
 		pane, hasPane := panes[st.Pane]
@@ -75,46 +75,41 @@ func liveStates(session string, panes map[int]mux.ZellijPane) []state {
 	return out
 }
 
-// refreshBadges ends each tab name with one glyph per session in it that needs you, is unvisited, or works.
-func refreshBadges(session string) {
+// refreshBadges ends each tab name with one glyph per session in it that needs you, is unvisited, or works. In tmux
+// the glyphs also go in the window's @cc_status option, and only on the names of windows named by someone.
+func refreshBadges(srv mux.Server) {
 	if !tabBadges() {
 		return
 	}
 	withLock("badges", func() {
-		panes, err := mux.ZellijPanes(session)
+		panes, err := srv.Panes()
 		if err != nil {
 			logf("badges: %v", err)
 			return
 		}
-		tabs, err := mux.ZellijTabs(session)
+		tabs, err := srv.Tabs()
 		if err != nil {
 			logf("badges: %v", err)
 			return
 		}
 		reg := claudeRegistry()
 		marks := map[int][]string{}
-		for _, st := range liveStates(session, panes) {
+		for _, st := range liveStates(srv, panes) {
 			if s := effectiveState(st, reg); s == needs || s == done || s == working {
 				tab := panes[st.Pane].TabID
 				marks[tab] = append(marks[tab], s)
 			}
 		}
 		for _, tab := range tabs {
-			states := marks[tab.TabID]
+			states := marks[tab.ID]
 			slices.SortStableFunc(states, func(a, b string) int { return rank[a] - rank[b] })
 			glyphs := ""
 			for _, s := range states {
 				glyphs += glyph[s]
 			}
-			name := mux.TabBase(tab.Name)
-			if glyphs != "" {
-				name += " " + glyphs
-			}
-			if name != tab.Name {
-				if _, err := mux.ZellijAction(session, "rename-tab-by-id", itoa(tab.TabID), name); err != nil {
-					logf("badges: %v", err)
-					return
-				}
+			if err := srv.SetBadge(tab, glyphs); err != nil {
+				logf("badges: %v", err)
+				return
 			}
 		}
 	})

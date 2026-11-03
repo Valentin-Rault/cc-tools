@@ -133,6 +133,7 @@ func hookEnv(t *testing.T) (spawned *[]string) {
 	os.WriteFile(filepath.Join(home, ".claude/sessions/1.json"), reg, 0o644)
 	t.Setenv("ZELLIJ_SESSION_NAME", "z")
 	t.Setenv("ZELLIJ_PANE_ID", "5")
+	t.Setenv("TMUX", "") // whatever the tests run in
 	spawned = &[]string{}
 	was, wasFront := spawn, terminalFrontmost
 	spawn = func(args ...string) { *spawned = append(*spawned, strings.Join(args, " ")) }
@@ -239,11 +240,11 @@ func TestLiveStates(t *testing.T) {
 	} {
 		saveState(st)
 	}
-	panes, err := mux.ZellijPanes("z")
+	panes, err := mux.Zellij("z").Panes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := liveStates("z", panes)
+	live := liveStates(mux.Zellij("z"), panes)
 	var ids []string
 	for _, st := range live {
 		ids = append(ids, st.SessionID)

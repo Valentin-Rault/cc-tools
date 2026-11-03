@@ -69,7 +69,7 @@ func processParents() map[int]int {
 }
 
 // Jump makes the pane the active one of its window, its window the current one of its session, and switches to that
-// session when it isn't pr-watch's.
+// session when it isn't the caller's; then cc-status plays its cue there.
 func (t tmuxMux) Jump(socket, pane string) error {
 	if socket != t.socket {
 		return errors.New("that session runs in another tmux server")
@@ -84,11 +84,13 @@ func (t tmuxMux) Jump(socket, pane string) error {
 	if err != nil {
 		return err
 	}
-	if ours, err := tmux(socket, "display-message", "-p", "-t", t.pane, "#{session_id}"); err == nil && ours == theirs {
-		return nil
+	if ours, err := tmux(socket, "display-message", "-p", "-t", t.pane, "#{session_id}"); err != nil || ours != theirs {
+		if _, err := tmux(socket, "switch-client", "-t", pane); err != nil {
+			return err
+		}
 	}
-	_, err = tmux(socket, "switch-client", "-t", pane)
-	return err
+	playCue(Tmux(socket), strings.TrimPrefix(pane, "%"))
+	return nil
 }
 
 // OpenTab: a window of that name already gets a new pane, shown; else a new window, at the end.

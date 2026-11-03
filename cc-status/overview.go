@@ -28,7 +28,7 @@ var (
 )
 
 type row struct {
-	zellij      string
+	srv         mux.Server
 	pane        int
 	tabID       int
 	tabPosition int
@@ -91,40 +91,44 @@ func fit(text string, w int) string {
 	return b.String() + "…" + strings.Repeat(" ", w-1-used)
 }
 
-func makeRow(session string, p mux.ZellijPane, st, kind, detail string, since float64, cwd string, bg bool) row {
+func makeRow(srv mux.Server, p mux.Pane, st, kind, detail string, since float64, cwd string, bg bool) row {
 	title := strings.TrimSpace(titlePrefix.ReplaceAllString(p.Title, ""))
-	if title == "" || defaultTitle.MatchString(title) {
+	if title == "" || defaultTitle.MatchString(title) || isHostname(title) {
 		title = "claude"
 	}
 	project := filepath.Base(strings.TrimRight(cwd, "/"))
 	if strings.TrimRight(cwd, "/") == "" {
 		project = "~"
 	}
-	return row{zellij: session, pane: p.ID, tabID: p.TabID, tabPosition: p.TabPosition, tab: mux.TabBase(p.TabName),
+	return row{srv: srv, pane: p.ID, tabID: p.TabID, tabPosition: p.TabPosition, tab: mux.TabBase(p.TabName),
 		title: title, state: st, kind: kind, detail: detail, since: since, project: project, bg: bg}
 }
 
-// collect is one row per Claude pane: the hook's state joined with zellij's panes and Claude's registry.
+// collect is one row per Claude pane: the hook's state joined with the multiplexer's panes and Claude's registry.
 func collect() []row {
-	here := os.Getenv("ZELLIJ_SESSION_NAME")
 	states, reg := loadStates(), claudeRegistry()
-	seen := map[string]bool{}
+	seen := map[mux.Server]bool{}
 	for _, st := range states {
-		if st.Zellij != "" {
-			seen[st.Zellij] = true
+		if st.server().Where != "" {
+			seen[st.server()] = true
 		}
 	}
-	if here != "" {
+	if here, _, ok := mux.Here(); ok {
 		seen[here] = true
 	}
+	servers := make([]mux.Server, 0, len(seen))
+	for srv := range seen {
+		servers = append(servers, srv)
+	}
+	slices.SortFunc(servers, func(a, b mux.Server) int { return strings.Compare(a.String(), b.String()) })
 	var rows []row
-	for _, session := range sortedKeys(seen) {
-		panes, err := mux.ZellijPanes(session)
+	for _, srv := range servers {
+		panes, err := srv.Panes()
 		if err != nil {
 			continue
 		}
 		tracked := map[int]bool{}
-		for _, st := range liveStates(session, panes) {
+		for _, st := range liveStates(srv, panes) {
 			tracked[st.Pane] = true
 			s := effectiveState(st, reg)
 			kind := s
@@ -132,11 +136,11 @@ func collect() []row {
 				kind = st.Kind
 			}
 			bg := (s == done || s == idle) && reg[st.SessionID].Status == "shell"
-			rows = append(rows, makeRow(session, panes[st.Pane], s, kind, st.Detail, st.Since, st.Cwd, bg))
+			rows = append(rows, makeRow(srv, panes[st.Pane], s, kind, st.Detail, st.Since, st.Cwd, bg))
 		}
 		for _, id := range sortedKeys(panes) {
 			if p := panes[id]; !tracked[id] && runsClaude(p) {
-				rows = append(rows, makeRow(session, p, untracked, "untracked", "no hook events from this session yet", 0, p.Cwd, false))
+				rows = append(rows, makeRow(srv, p, untracked, "untracked", "no hook events from this session yet", 0, p.Cwd, false))
 			}
 		}
 	}
@@ -205,22 +209,26 @@ func layout(rows []row, selected, w, h int, colored, interactive bool) []string 
 	heading := " Claude sessions"
 	lines := []string{paint("1", heading) + strings.Repeat(" ", max(1, w-runeLen(heading)-runeLen(summary)-1)) + summary, ""}
 	if len(rows) == 0 {
-		lines = append(lines, "  No Claude panes in this zellij session.")
+		where := "zellij session"
+		if here, _, ok := mux.Here(); ok && here.Kind == "tmux" {
+			where = "tmux server"
+		}
+		lines = append(lines, "  No Claude panes in this "+where+".")
 		if interactive {
 			lines = append(lines, "", paint("2", "  q quit"))
 		}
 		return lines
 	}
-	sessions := map[string]bool{}
+	sessions := map[mux.Server]bool{}
 	for _, r := range rows {
-		sessions[r.zellij] = true
+		sessions[r.srv] = true
 	}
 	tabs := make([]string, len(rows))
 	tabW, projW := 0, 0
 	for i, r := range rows {
 		tabs[i] = r.tab
 		if len(sessions) > 1 {
-			tabs[i] = r.zellij + ":" + r.tab
+			tabs[i] = r.srv.Label() + ":" + r.tab
 		}
 		tabW, projW = max(tabW, runeLen(tabs[i])), max(projW, runeLen(r.project))
 	}
@@ -258,7 +266,7 @@ func layout(rows []row, selected, w, h int, colored, interactive bool) []string 
 	}
 	if interactive && selected >= 0 && selected < len(rows) {
 		r := rows[selected]
-		lines = append(lines, "", paint("2", "  "+strings.TrimRight(fit(fmt.Sprintf("%s › %s › terminal_%d · %s", r.zellij, r.tab, r.pane, r.project), w-2), " ")))
+		lines = append(lines, "", paint("2", "  "+strings.TrimRight(fit(fmt.Sprintf("%s › %s › %s · %s", r.srv.Label(), r.tab, r.srv.PaneName(r.pane), r.project), w-2), " ")))
 		wrapped := wrap(r.detail, w-4)
 		if len(wrapped) > 3 {
 			wrapped = wrapped[:3]
@@ -303,21 +311,27 @@ func wrap(text string, w int) []string {
 
 // jump goes to the row's pane, plays the cue there, and counts a ✓ as seen.
 func jump(r row) {
-	here := os.Getenv("ZELLIJ_SESSION_NAME")
-	if err := mux.NewZellij(here, "").Jump(r.zellij, itoa(r.pane)); err != nil {
+	if err := r.srv.Jump(r.pane); err != nil {
 		logf("jump: %v", err)
 		return
 	}
-	if r.state == done && markSeen(r.zellij, map[int]bool{r.pane: true}) {
-		refreshBadges(r.zellij)
+	if r.state == done && markSeen(r.srv, map[int]bool{r.pane: true}) {
+		refreshBadges(r.srv)
 	}
 }
 
+// isHostname: tmux titles a pane with the host's name until the program in it sets one.
+func isHostname(title string) bool {
+	host, err := os.Hostname()
+	short, _, _ := strings.Cut(host, ".")
+	return err == nil && (title == host || title == short)
+}
+
 func cmdUI() {
-	here := os.Getenv("ZELLIJ_SESSION_NAME")
+	here, _, inMux := mux.Here()
 	fd := int(os.Stdin.Fd())
-	if here == "" || !term.IsTerminal(fd) {
-		fmt.Fprintln(os.Stderr, "cc-status ui: run it inside a zellij pane")
+	if !inMux || !term.IsTerminal(fd) {
+		fmt.Fprintln(os.Stderr, "cc-status ui: run it inside a zellij or tmux pane")
 		os.Exit(1)
 	}
 	saved, err := term.MakeRaw(fd)

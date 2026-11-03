@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Valentin-Rault/cc-tools/internal/mux"
 )
 
 // Where cc-status keeps a state file per session, and its log. The format is the Python version's: either can read
@@ -53,11 +55,29 @@ type state struct {
 	State     string  `json:"state"`
 	Kind      string  `json:"kind"`
 	Detail    string  `json:"detail"`
-	Since     float64 `json:"since"` // Unix seconds
-	Zellij    string  `json:"zellij"`
+	Since     float64 `json:"since"`          // Unix seconds
+	Zellij    string  `json:"zellij"`         // the zellij session, or "" in tmux
+	Tmux      string  `json:"tmux,omitempty"` // the tmux server's socket; absent in zellij, as the Python version wrote
 	Pane      int     `json:"pane"`
 	Cwd       string  `json:"cwd"`
 	Pid       *int    `json:"pid"` // the claude process; null when it wasn't found
+}
+
+// server is the zellij session or tmux server the session's pane is in.
+func (s state) server() mux.Server {
+	if s.Tmux != "" {
+		return mux.Tmux(s.Tmux)
+	}
+	return mux.Zellij(s.Zellij)
+}
+
+func (s *state) setServer(srv mux.Server) {
+	s.Zellij, s.Tmux = "", ""
+	if srv.Kind == "tmux" {
+		s.Tmux = srv.Where
+	} else {
+		s.Zellij = srv.Where
+	}
 }
 
 func (s state) pid() int {
@@ -168,11 +188,11 @@ func dropState(sessionID string) {
 }
 
 // markSeen turns ✓ to idle on these panes; true if anything changed.
-func markSeen(session string, panes map[int]bool) bool {
+func markSeen(srv mux.Server, panes map[int]bool) bool {
 	changed := false
 	withLock("state", func() {
 		for _, st := range loadStates() {
-			if st.Zellij == session && panes[st.Pane] && st.State == done {
+			if st.server() == srv && panes[st.Pane] && st.State == done {
 				st.State, st.Kind, st.Since = idle, "idle", now()
 				saveState(st)
 				changed = true

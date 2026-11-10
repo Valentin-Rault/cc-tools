@@ -88,6 +88,38 @@ func TestDiffReviewed(t *testing.T) {
 	}
 }
 
+func TestAskedWhom(t *testing.T) {
+	mine := map[string]int{"backend": 6, "infra": 3}
+	cases := []struct {
+		name, json string
+		mine       map[string]int
+		direct     bool
+		teams      []string
+		codeOwner  bool
+	}{
+		{"named you", `[{"requestedReviewer": {"login": "ME"}}, {"requestedReviewer": {"login": "dave"}}]`, mine, true, nil, false},
+		{"named you and your team", `[{"requestedReviewer": {"login": "me"}}, {"asCodeOwner": true, "requestedReviewer": {"slug": "backend"}}]`,
+			mine, true, []string{"backend"}, true},
+		{"only your team", `[{"requestedReviewer": {"login": "dave"}}, {"requestedReviewer": {"slug": "platform"}},
+			{"requestedReviewer": {"slug": "infra"}}]`, mine, false, []string{"infra"}, false},
+		{"your teams unknown", `[{"requestedReviewer": {"slug": "security"}}, {"asCodeOwner": true, "requestedReviewer": {"slug": "platform"}}]`,
+			nil, false, []string{"platform"}, true},
+		{"yours inside the one asked", `[{"requestedReviewer": {"slug": "engineering"}}]`, mine, false, []string{"engineering"}, false},
+		{"only the security team", `[{"requestedReviewer": {"slug": "security"}}]`, nil, false, []string{"security"}, false},
+		{"nobody named", `[{"requestedReviewer": null}]`, mine, false, nil, false},
+	}
+	for _, c := range cases {
+		var n reviewNode
+		if err := json.Unmarshal([]byte(`{"reviewRequests": {"nodes": `+c.json+`}}`), &n); err != nil {
+			t.Fatal(c.name, err)
+		}
+		direct, teams, codeOwner := askedWhom(n, "me", "security", c.mine)
+		if direct != c.direct || !slices.Equal(teams, c.teams) || codeOwner != c.codeOwner {
+			t.Errorf("%s: direct=%v teams=%q codeOwner=%v", c.name, direct, teams, codeOwner)
+		}
+	}
+}
+
 func TestOtherReviews(t *testing.T) {
 	cases := []struct {
 		name, json, security string

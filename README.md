@@ -42,8 +42,11 @@ and `esc` puts the one you had back; cc-status's popup follows. Each PR shows it
 `⚠ conflicts` when it has merge conflicts, and its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
 how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
 `security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
-requested; Nerd Font icons, which Ghostty ships). `e` opens a pane beside the lists with more about the selected
-PR: its status, reviews, size, how long it has waited, its latest events. `m` adds one of your PRs to the merge
+requested; Nerd Font icons, which Ghostty ships). Requests that name you come first; the ones GitHub sent a team
+you're in come after, under their own heading, and the tab and status line count them apart (`To review 2 +3 via
+teams`). Each row says who was asked: you, or the team. `e` opens a pane beside the lists with more about the selected
+PR: how you were asked (directly, or through a team, as code owners or not), its status, reviews, size, how long it
+has waited, its latest events. `m` adds one of your PRs to the merge
 queue, at the commit you see; `m` on a queued one takes it out again, so a slip is one key to undo. pr-watch doesn't
 merge directly: that can't be undone. *Reviewed* lists the open PRs
 of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in

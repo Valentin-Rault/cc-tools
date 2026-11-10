@@ -32,7 +32,14 @@ type ReviewRequest struct {
 	Security             string   // the security team's review: "", "requested", "approved" or "changes"
 	CI                   string   // rollup state of its checks, NONE without any
 	QueuePosition        int      // its place in the merge queue, 0 when it isn't queued
+	Direct               bool     // a request names you, whatever teams it names too
+	Teams                []string // the teams of yours GitHub asked; every team asked when it can't tell which
+	CodeOwner            bool     // those teams were asked as code owners
+	TeamSize             int      // how many people are in the team, when there's one and pr-watch knows
 }
+
+// TeamOnly is a request that came through a team of yours and doesn't name you.
+func (r ReviewRequest) TeamOnly() bool { return !r.Direct && len(r.Teams) > 0 }
 
 // Watcher is the poll loop of the old bash poller, one Poll per tick. Only one Poll runs at a time.
 type Watcher struct {
@@ -46,6 +53,7 @@ type Watcher struct {
 	refreshed time.Time         // the last successful refresh
 	toReview  []ReviewRequest
 	reviewed  []ReviewedPR
+	teams     map[string]int // your teams and their sizes; nil until GitHub said, asked again each refresh until then
 	notify    func(title, body string)
 }
 
@@ -190,7 +198,11 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed, merged []int, 
 		return nil, nil, nil, fmt.Errorf("saving the reviewed snapshot: %w", err)
 	}
 	w.snap, w.reviewed = snap, reviewed
-	w.toReview = reviewRequests(d.Review.Nodes, w.reviewed, w.me, w.cfg.SecurityTeam)
+	if w.teams == nil { // once: teams change rarely, and a restart reads them again
+		owner, _, _ := strings.Cut(w.cfg.Repo, "/")
+		w.teams, _ = w.gh.Teams(owner, w.me) // without them, To review still tells requests that name you
+	}
+	w.toReview = reviewRequests(d.Review.Nodes, w.reviewed, w.me, w.cfg.SecurityTeam, w.teams)
 	w.store.write("refs", w.pushedRefs())
 	w.store.remove("retry")
 	w.refreshed = now
@@ -295,7 +307,8 @@ func prNumber(s string) (int, error) {
 }
 
 // reviewRequests are the PRs waiting for your review, minus those you reviewed already (they show under Reviewed).
-func reviewRequests(nodes []reviewNode, reviewed []ReviewedPR, me, team string) []ReviewRequest {
+// The ones that name you come first, then the ones GitHub asked a team of yours for; mine are your teams.
+func reviewRequests(nodes []reviewNode, reviewed []ReviewedPR, me, team string, mine map[string]int) []ReviewRequest {
 	var out []ReviewRequest
 	for _, n := range nodes {
 		// a PR you already reviewed and are asked to look at again shows under Reviewed, not twice
@@ -303,6 +316,10 @@ func reviewRequests(nodes []reviewNode, reviewed []ReviewedPR, me, team string) 
 			r := ReviewRequest{Number: n.Number, Title: n.Title, URL: n.URL, Author: "ghost", Draft: n.IsDraft,
 				Additions: n.Additions, Deletions: n.Deletions}
 			r.ApprovedBy, r.Security = otherReviews(n, me, team)
+			r.Direct, r.Teams, r.CodeOwner = askedWhom(n, me, team, mine)
+			if len(r.Teams) == 1 {
+				r.TeamSize = mine[r.Teams[0]]
+			}
 			r.CI = "NONE"
 			if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
 				r.CI = n.Commits.Nodes[0].Commit.StatusCheckRollup.State
@@ -317,7 +334,14 @@ func reviewRequests(nodes []reviewNode, reviewed []ReviewedPR, me, team string) 
 			out = append(out, r)
 		}
 	}
-	// someone else already approved these: your review matters less, so they go last
-	slices.SortStableFunc(out, func(a, b ReviewRequest) int { return min(len(a.ApprovedBy), 1) - min(len(b.ApprovedBy), 1) })
+	// a team's requests go after yours, and in each, someone else already approved some: your review matters less there
+	rank := func(r ReviewRequest) int {
+		n := min(len(r.ApprovedBy), 1)
+		if r.TeamOnly() {
+			n += 2
+		}
+		return n
+	}
+	slices.SortStableFunc(out, func(a, b ReviewRequest) int { return rank(a) - rank(b) })
 	return out
 }

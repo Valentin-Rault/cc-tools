@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,7 +62,8 @@ func (m *model) View() tea.View {
 
 func (m *model) body(w, h int) []string {
 	var rows []string
-	var nums []int // the PR on each row
+	var nums []int  // the PR on each row, 0 on a heading
+	var rowOf []int // the row of each PR, when headings sit between them
 	empty := ""
 	if m.list == panelMine {
 		for _, n := range m.prList() {
@@ -69,7 +71,12 @@ func (m *model) body(w, h int) []string {
 		}
 		empty = "no open PRs"
 	} else if m.list == panelReview {
-		for _, r := range m.toReview {
+		_, teams := m.reviewCounts()
+		for i, r := range m.toReview {
+			if teams > 0 && (i == 0 || m.toReview[i-1].TeamOnly() != r.TeamOnly()) {
+				rows, nums = append(rows, m.reviewHeading(r.TeamOnly(), w-6)), append(nums, 0)
+			}
+			rowOf = append(rowOf, len(rows))
 			rows, nums = append(rows, m.reviewRow(r, w-6)), append(nums, r.Number)
 		}
 		empty = "nothing waiting for your review"
@@ -89,14 +96,18 @@ func (m *model) body(w, h int) []string {
 	if len(rows) == 0 {
 		inner = []string{"   " + comment.Render(empty)}
 	} else {
-		inner = window(rows, m.cursor[m.list], listH-2, w, m.inList, marked)
+		sel := m.cursor[m.list]
+		if sel < len(rowOf) {
+			sel = rowOf[sel]
+		}
+		inner = window(rows, sel, listH-2, w, m.inList, marked)
 	}
 	lines := frame(m.listTitle(fresh), inner, w, listH, m.inList)
 
-	evRows, rowOf := m.eventRows(w - 6)
+	evRows, evRowOf := m.eventRows(w - 6)
 	sel := -1
-	if c := m.cursor[panelEvents]; c < len(rowOf) {
-		sel = rowOf[c]
+	if c := m.cursor[panelEvents]; c < len(evRowOf) {
+		sel = evRowOf[c]
 	}
 	evH := max(3, h-listH)
 	if len(evRows) == 0 {
@@ -116,7 +127,7 @@ func (m *model) body(w, h int) []string {
 
 // listTitle names the lists, each with how many of its PRs have something new.
 func (m *model) listTitle(fresh map[int]bool) string {
-	tab := func(panel int, label string, nums []int) string {
+	tab := func(panel int, label, extra string, nums []int) string {
 		st := comment
 		if m.list == panel {
 			st = bold
@@ -128,9 +139,9 @@ func (m *model) listTitle(fresh map[int]bool) string {
 			}
 		}
 		if n > 0 {
-			return st.Render(label) + blue.Render(fmt.Sprintf(" ✦%d", n))
+			return st.Render(label) + extra + blue.Render(fmt.Sprintf(" ✦%d", n))
 		}
-		return st.Render(label)
+		return st.Render(label) + extra
 	}
 	var review, reviewed []int
 	for _, r := range m.toReview {
@@ -139,10 +150,15 @@ func (m *model) listTitle(fresh map[int]bool) string {
 	for _, r := range m.reviewed {
 		reviewed = append(reviewed, r.Number)
 	}
+	yours, teams := m.reviewCounts()
+	viaTeams := ""
+	if teams > 0 {
+		viaTeams = comment.Render(fmt.Sprintf(" +%d via teams", teams))
+	}
 	sep := gutter.Render("  ·  ")
-	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs)), m.prList()) + sep +
-		tab(panelReview, fmt.Sprintf("To review %d", len(m.toReview)), review) + sep +
-		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), reviewed) + comment.Render("  "+m.keys.Firsts("left", "right"))
+	return tab(panelMine, fmt.Sprintf("My PRs %d", len(m.prs)), "", m.prList()) + sep +
+		tab(panelReview, fmt.Sprintf("To review %d", yours), viaTeams, review) + sep +
+		tab(panelReviewed, fmt.Sprintf("Reviewed %d", len(m.reviewed)), "", reviewed) + comment.Render("  "+m.keys.Firsts("left", "right"))
 }
 
 // frame draws a rounded frame of w×h around lines, with the title in its top border. Focused frames are blue.
@@ -282,14 +298,66 @@ func shield(review string) string {
 // reviewRow keeps what matters at a glance: the security shield, the PR's status, who else approved it. How long
 // it waited and its size are in the details (e).
 func (m *model) reviewRow(r ReviewRequest, w int) string {
-	const statusW, authorW, approvedW = 2, 12, 18
-	titleW := max(16, w-7-2-2-statusW-2-authorW-2-approvedW)
+	const statusW, authorW, askedW, approvedW = 2, 12, 14, 18
+	titleW := max(16, w-7-2-2-statusW-2-authorW-2-askedW-2-approvedW)
 	title := text.Render(r.Title)
 	if r.Draft {
 		title = faint.Render("draft ") + title
 	}
 	return m.prNumber(r.Number, r.Title, r.Author, text) + cell(shield(r.Security), 2) + cell(title, titleW) + "  " +
-		cell(statusIcon(r), statusW) + "  " + cell(text2.Render(r.Author), authorW) + "  " + approvedCell(r.ApprovedBy)
+		cell(statusIcon(r), statusW) + "  " + cell(text2.Render(r.Author), authorW) + "  " + cell(askedCell(r), askedW) + "  " +
+		approvedCell(r.ApprovedBy)
+}
+
+// Nerd Fonts icons for who a review request named: you, or a team of yours.
+const personIcon, teamIcon = "\U000F0004", "\U000F0849"
+
+// askedCell is who GitHub asked for the review: you, or the team of yours it came through.
+func askedCell(r ReviewRequest) string {
+	if !r.TeamOnly() {
+		return blue.Render(personIcon) + text.Render(" you")
+	}
+	more := ""
+	if len(r.Teams) > 1 {
+		more = fmt.Sprintf(" +%d", len(r.Teams)-1)
+	}
+	return comment.Render(teamIcon) + faint.Render(" "+r.Teams[0]+more)
+}
+
+// reviewCounts splits To review: the requests that name you, and the ones that only came through a team of yours.
+func (m *model) reviewCounts() (yours, teams int) {
+	for _, r := range m.toReview {
+		if r.TeamOnly() {
+			teams++
+		} else {
+			yours++
+		}
+	}
+	return yours, teams
+}
+
+// reviewHeading heads each part of To review, like the events' days: what asked you, then what asked your teams.
+func (m *model) reviewHeading(teamOnly bool, w int) string {
+	n, label, names := 0, "asked you", []string{}
+	if teamOnly {
+		label = "asked your teams"
+	}
+	for _, r := range m.toReview {
+		if r.TeamOnly() != teamOnly {
+			continue
+		}
+		n++
+		for _, t := range r.Teams {
+			if teamOnly && !slices.Contains(names, t) {
+				names = append(names, t)
+			}
+		}
+	}
+	head := comment.Render(label) + faint.Render(fmt.Sprintf(" %d", n))
+	if len(names) > 0 {
+		head += comment.Render("  " + strings.Join(names, ", "))
+	}
+	return head + " " + gutter.Render(strings.Repeat("─", max(0, w-lipgloss.Width(head)-1)))
 }
 
 // statusIcon is a PR's state in one glyph: already queued to merge, or how its checks are doing.
@@ -515,6 +583,7 @@ func (m *model) statusLine(w int) string {
 		count := func(n int, c lipgloss.Style, label string) string {
 			return bar.Inherit(c).Bold(true).Render(strconv.Itoa(n)) + bar.Render(label)
 		}
+		yours, teams := m.reviewCounts()
 		again := 0
 		for _, r := range m.reviewed {
 			if r.NeedsYou() {
@@ -522,7 +591,8 @@ func (m *model) statusLine(w int) string {
 			}
 		}
 		middle = bar.Render("  ") + count(len(m.prs), text, " open   ") + count(failing, red, " failing   ") +
-			map[bool]string{true: count(conflicting, orange, " conflicting   ")}[conflicting > 0] + count(queued, cyan, " queued   ") + count(len(m.toReview), blue, " to review   ") + count(again, fg(magentaColor), " to re-review")
+			map[bool]string{true: count(conflicting, orange, " conflicting   ")}[conflicting > 0] + count(queued, cyan, " queued   ") + count(yours, blue, " to review   ") +
+			map[bool]string{true: count(teams, faint, " via teams   ")}[teams > 0] + count(again, fg(magentaColor), " to re-review")
 	}
 
 	right := segment.Render(" " + m.cfg.Repo + " ")
@@ -676,6 +746,20 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 		}
 		r := m.toReview[i]
 		head(r.Number, r.Title, "by "+r.Author)
+		owners := map[bool]string{true: ", as code owners"}[r.CodeOwner]
+		if r.TeamOnly() {
+			asked := []string{text2.Render(teamIcon + " " + strings.Join(r.Teams, ", ") + owners)}
+			if r.TeamSize > 0 {
+				asked = append(asked, faint.Render(fmt.Sprintf("you're one of its %d members", r.TeamSize)))
+			}
+			field("asked", asked...)
+		} else {
+			asked := []string{blue.Render(personIcon) + text2.Render(map[bool]string{true: " you, directly", false: " you"}[r.Direct])}
+			if len(r.Teams) > 0 {
+				asked = append(asked, comment.Render(teamIcon)+faint.Render(" "+strings.Join(r.Teams, ", ")+" too"+owners))
+			}
+			field("asked", asked...)
+		}
 		var status []string
 		if r.QueuePosition > 0 {
 			status = append(status, cyan.Render(fmt.Sprintf("⧗ in the merge queue (%s)", ordinal(r.QueuePosition))),

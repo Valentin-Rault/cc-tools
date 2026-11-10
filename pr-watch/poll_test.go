@@ -18,7 +18,18 @@ type fakeGitHub struct {
 	states    map[int]string // what States answers; a PR missing from it gets no answer
 	statesErr error
 	queueErr  error
-	queued    []string // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
+	queued    []string       // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
+	teams     map[string]int // what Teams answers
+	teamsErr  error
+	teamsAsks int
+}
+
+func (f *fakeGitHub) Teams(owner, me string) (map[string]int, error) {
+	f.teamsAsks++
+	if f.teamsErr != nil {
+		return nil, f.teamsErr
+	}
+	return f.teams, nil
 }
 
 func (f *fakeGitHub) States(string, []int) (map[int]string, error) { return f.states, f.statesErr }
@@ -348,6 +359,46 @@ func TestApprovedReviewRequestsGoLast(t *testing.T) {
 	}
 	if r.ToReview[1].Security != "approved" || len(r.ToReview[2].ApprovedBy) != 1 {
 		t.Errorf("to review = %+v", r.ToReview)
+	}
+}
+
+// Requests that name you come before the ones a team of yours got, each with PRs others approved last. pr-watch
+// asks GitHub for your teams until it has them, then no more.
+func TestTeamRequestsGoAfterYours(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	w, gh, _ := newTestWatcher(t, store)
+	var review struct{ Nodes []reviewNode }
+	json.Unmarshal([]byte(`{"nodes": [
+		{"number": 30, "title": "backend, approved", "reviewRequests": {"nodes": [{"asCodeOwner": true, "requestedReviewer": {"slug": "backend"}}]},
+			"latestOpinionatedReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "lucas"}}]}},
+		{"number": 31, "title": "backend", "reviewRequests": {"nodes": [{"asCodeOwner": true, "requestedReviewer": {"slug": "backend"}}]}},
+		{"number": 32, "title": "you, approved", "reviewRequests": {"nodes": [{"requestedReviewer": {"login": "me"}}]},
+			"latestOpinionatedReviews": {"nodes": [{"state": "APPROVED", "author": {"login": "lucas"}}]}},
+		{"number": 33, "title": "you and backend", "reviewRequests": {"nodes": [{"requestedReviewer": {"login": "Me"}},
+			{"requestedReviewer": {"slug": "backend"}}, {"requestedReviewer": {"slug": "platform"}}]}}]}`), &review)
+	gh.search.Review = review
+	gh.teamsErr = errors.New("no read:org")
+	if r := w.Poll(true); r.ToReview[2].Number != 31 || !slices.Equal(r.ToReview[2].Teams, []string{"backend"}) || r.ToReview[2].TeamSize != 0 {
+		t.Errorf("without your teams: %+v", r.ToReview[2])
+	}
+	gh.teamsErr, gh.teams = nil, map[string]int{"backend": 6}
+	r := w.Poll(true)
+	w.Poll(true)
+	if gh.teamsAsks != 2 {
+		t.Errorf("asked for your teams %d times, want once more after the error", gh.teamsAsks)
+	}
+	var order []int
+	for _, rr := range r.ToReview {
+		order = append(order, rr.Number)
+	}
+	if !slices.Equal(order, []int{33, 32, 31, 30}) {
+		t.Errorf("order = %v", order)
+	}
+	if you := r.ToReview[0]; !you.Direct || !slices.Equal(you.Teams, []string{"backend"}) || you.TeamOnly() {
+		t.Errorf("asked you and your team: %+v", you)
+	}
+	if team := r.ToReview[2]; !team.TeamOnly() || !team.CodeOwner || team.TeamSize != 6 {
+		t.Errorf("asked your team: %+v", team)
 	}
 }
 

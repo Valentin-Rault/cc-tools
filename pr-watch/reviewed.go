@@ -172,6 +172,40 @@ func diffReviewed(old map[string]ReviewedStored, prs []ReviewedPR, at time.Time)
 	return events
 }
 
+// askedWhom reads a PR's review requests: whether one names you, and which teams of yours were asked, as code
+// owners or not. A request that doesn't name you came through a team: when none of yours is among those asked (pr-watch
+// doesn't know your teams, or yours sits inside one asked), it lists them all but the security team, which has its
+// shield, unless that's the only one.
+func askedWhom(n reviewNode, me, security string, mine map[string]int) (direct bool, teams []string, codeOwner bool) {
+	var asked []string
+	owners := map[string]bool{}
+	for _, rr := range n.ReviewRequests.Nodes {
+		switch who := rr.RequestedReviewer; {
+		case who == nil:
+		case who.Login != "":
+			direct = direct || strings.EqualFold(who.Login, me)
+		case who.Slug != "":
+			asked = append(asked, who.Slug)
+			owners[who.Slug] = owners[who.Slug] || rr.AsCodeOwner
+		}
+	}
+	for _, t := range asked {
+		if _, ok := mine[t]; ok {
+			teams = append(teams, t)
+		}
+	}
+	if !direct && len(teams) == 0 {
+		teams = slices.DeleteFunc(slices.Clone(asked), func(t string) bool { return strings.EqualFold(t, security) })
+		if len(teams) == 0 {
+			teams = asked
+		}
+	}
+	for _, t := range teams {
+		codeOwner = codeOwner || owners[t]
+	}
+	return direct, teams, codeOwner
+}
+
 // otherReviews reads a PR waiting for your review: who else approved it, and where the security team's review
 // stands. An approval made on the team's behalf counts for the team, not as someone else's approval.
 func otherReviews(n reviewNode, me, team string) (approvedBy []string, security string) {

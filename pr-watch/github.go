@@ -20,6 +20,7 @@ type GitHub interface {
 	States(repo string, prs []int) (map[int]string, error) // OPEN, CLOSED or MERGED, by PR number
 	Enqueue(prID, head string) error                       // add a PR to its merge queue, if its head is still head
 	Dequeue(prID string) error                             // take it out again
+	Teams(owner, me string) (map[string]int, error)        // your teams at the repo's owner, by slug, with their sizes
 }
 
 const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
@@ -33,7 +34,7 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     number title url isDraft createdAt additions deletions author { login } mergeQueueEntry { position }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-    reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } } } }
+    reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { ... on Team { slug } ... on User { login } } } }
     latestOpinionatedReviews(first: 20) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
   reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
@@ -99,7 +100,8 @@ type reviewNode struct {
 	}
 	ReviewRequests struct {
 		Nodes []struct {
-			RequestedReviewer *struct{ Slug string } // a team; empty for a person
+			AsCodeOwner       bool
+			RequestedReviewer *struct{ Slug, Login string } // a team's slug, or a person's login
 		}
 	}
 	LatestOpinionatedReviews struct { // each reviewer's latest approval or request for changes
@@ -219,6 +221,33 @@ func (c *ghClient) States(repo string, prs []int) (map[int]string, error) {
 		}
 	}
 	return states, nil
+}
+
+// Teams are the teams you're in at owner, by slug, with how many people are in each. A person owning the repo has
+// none: that's no error.
+func (c *ghClient) Teams(owner, me string) (map[string]int, error) {
+	var d struct {
+		RepositoryOwner *struct {
+			Teams struct {
+				Nodes []struct {
+					Slug    string
+					Members struct{ TotalCount int }
+				}
+			}
+		}
+	}
+	err := c.gql.Do(`query($owner: String!, $me: String!) { repositoryOwner(login: $owner) { ... on Organization {
+  teams(first: 100, userLogins: [$me]) { nodes { slug members { totalCount } } } } } }`, map[string]any{"owner": owner, "me": me}, &d)
+	if err != nil {
+		return nil, err
+	}
+	teams := map[string]int{}
+	if d.RepositoryOwner != nil {
+		for _, t := range d.RepositoryOwner.Teams.Nodes {
+			teams[t.Slug] = t.Members.TotalCount
+		}
+	}
+	return teams, nil
 }
 
 // Enqueue adds the PR to its merge queue. head is the commit you saw: GitHub refuses if the PR moved on since.

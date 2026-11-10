@@ -508,6 +508,54 @@ func TestReviewRowShieldAndApprovals(t *testing.T) {
 	}
 }
 
+// To review tells requests that name you from the ones a team of yours got: who was asked on each row, a heading over
+// each part, the two counted apart, and how you were asked in the details.
+func TestReviewRequestsYoursAndYourTeams(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 160, 26
+	m.toReview = []ReviewRequest{
+		{Number: 2705, Title: "Retry webhooks", Author: "carol", Direct: true, Created: time.Now()},
+		{Number: 2722, Title: "Cache exchange rates", Author: "alice", Direct: true, Teams: []string{"backend"}, CodeOwner: true, Created: time.Now()},
+		{Number: 2719, Title: "Rename the journal endpoints", Author: "frank", Teams: []string{"backend"}, CodeOwner: true, TeamSize: 6, Created: time.Now()},
+		{Number: 2698, Title: "Move the export worker", Author: "dave", Teams: []string{"platform", "infra"}, Created: time.Now()},
+	}
+	press(m, "right")
+	v := screen(m)
+	for _, want := range []string{"To review 2 +2 via teams", "asked you 2 ─", "asked your teams 2  backend, platform, infra ─",
+		"\U000F0004 you", "\U000F0849 backend", "\U000F0849 platform +1", "2 to review   2 via teams"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("to review lacks %q:\n%s", want, v)
+		}
+	}
+	lines := strings.Split(v, "\n")
+	at := func(s string) int {
+		return slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, s) })
+	}
+	if !(at("asked you 2") < at("#2705") && at("#2722") < at("asked your teams") && at("asked your teams") < at("#2719")) {
+		t.Errorf("the headings aren't over their parts:\n%s", v)
+	}
+	press(m, "down", "down", "e") // the third PR, under the second heading
+	v = screen(m)
+	if !strings.Contains(v, "▎ #2719") || !strings.Contains(v, "asked    \U000F0849 backend, as code owners") ||
+		!strings.Contains(v, "you're one of its 6 members") {
+		t.Errorf("the cursor should be on #2719, its details saying how you were asked:\n%s", v)
+	}
+	press(m, "up")
+	if v = screen(m); !strings.Contains(v, "\U000F0004 you, directly") || !strings.Contains(v, "\U000F0849 backend too, as code owners") {
+		t.Errorf("#2722 names you and your team:\n%s", v)
+	}
+}
+
+// With no team request, To review has no headings and counts as before.
+func TestReviewRequestsAllYours(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 160, 20
+	press(m, "right")
+	if v := screen(m); strings.Contains(v, "asked you") || strings.Contains(v, "via teams") || !strings.Contains(v, "To review 1 ") {
+		t.Errorf("headings or a team count with nothing from a team:\n%s", v)
+	}
+}
+
 // An approval is shown, for you: it isn't sent on its own and isn't waiting, but s sends it.
 func TestApprovalsAreForYou(t *testing.T) {
 	m := testModel(t)

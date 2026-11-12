@@ -43,7 +43,12 @@ func TestPRMatches(t *testing.T) {
 		{"#2711", 2711, "", "", true},
 		{"71", 2711, "", "", true}, // the digits you remember
 		{"2712", 2711, "", "", false},
-		{"2711", 3000, "Revert 2711", "", false}, // digits are for numbers
+		{"2711", 3000, "Revert 2711", "", false},             // digits are for numbers
+		{"2754", 1, "fix(api): tokens (FDN-2754)", "", true}, // and for the issues the title names
+		{"#275", 1, "fix(api): tokens (FDN-2754)", "", true},
+		{"2754", 1, "fix(api): tokens (FDN-2755, OPS-12)", "", false},
+		{"12", 1, "fix(api): tokens (FDN-2755, OPS-12)", "", true},
+		{"256", 1, "Hash with sha-256", "", false}, // not an issue
 		{"ledger", 1, "Ledger import", "", true},
 		{"LEDGER IMP", 1, "Ledger import", "", true},
 		{"bob", 1, "Ledger import", "bob", true},

@@ -50,7 +50,7 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 		keyRow{k("switch_panel"), "between the list and the events", false},
 	)
 	find = group("Find",
-		keyRow{k("search"), "a PR by number, title or author", false},
+		keyRow{k("search"), "a PR by number, issue, title or author", false},
 		keyRow{k("next_match", "prev_match"), "next and previous match", m.lastSearch == ""},
 		keyRow{k("clear_search"), "clear the search", m.lastSearch == ""},
 	)

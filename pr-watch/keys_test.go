@@ -34,7 +34,7 @@ func TestKeysPopup(t *testing.T) {
 	}
 	typeIn(m, "?")
 	v := screen(m)
-	for _, want := range []string{"Keys", "a PR by number, title or author", "pick the Claude session that owns it",
+	for _, want := range []string{"Keys", "a PR by number, issue, title or author", "pick the Claude session that owns it",
 		"take #2740 out of the merge queue", "switch to manual: hold events until s", "? or esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the popup lacks %q:\n%s", want, v)

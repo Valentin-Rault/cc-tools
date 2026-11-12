@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -9,8 +10,8 @@ import (
 
 // Search, the vim way: / opens a prompt and moves to the first match below the cursor as you type, ⏎ keeps it, esc
 // goes back; n and N then go to the next and previous match. It looks through the three PR lists, in the order they
-// show, and switches list when the match is in another one. Digits find PR numbers; other text finds titles and
-// authors. The matches' numbers stay highlighted until esc.
+// show, and switches list when the match is in another one. Digits find PR numbers, and the numbers of the issues
+// their titles name (FDN-2754); other text finds titles and authors. The matches' numbers stay highlighted until esc.
 
 // search is the open / prompt, and where / was pressed: typing searches from there, esc goes back.
 type search struct {
@@ -25,11 +26,23 @@ type spot struct{ list, row int }
 
 func (a spot) before(b spot) bool { return a.list < b.list || a.list == b.list && a.row < b.row }
 
-// prMatches: digits, with or without #, are part of the PR's number; other text is in its title or author's login.
+// issueKey is an issue named in a title, the way trackers write them: FDN-2754.
+var issueKey = regexp.MustCompile(`\b[A-Z][A-Z0-9]*-(\d+)\b`)
+
+// prMatches: digits, with or without #, are part of the PR's number, or of the number of an issue its title names;
+// other text is in its title or author's login.
 func prMatches(q string, number int, title, author string) bool {
 	q = strings.TrimSpace(q)
 	if digits := strings.TrimPrefix(q, "#"); digits != "" && strings.Trim(digits, "0123456789") == "" {
-		return strings.Contains(strconv.Itoa(number), digits)
+		if strings.Contains(strconv.Itoa(number), digits) {
+			return true
+		}
+		for _, k := range issueKey.FindAllStringSubmatch(title, -1) {
+			if strings.Contains(k[1], digits) {
+				return true
+			}
+		}
+		return false
 	}
 	q = strings.ToLower(q)
 	return q != "" && (strings.Contains(strings.ToLower(title), q) || author != "" && strings.Contains(strings.ToLower(author), q))
@@ -153,7 +166,7 @@ func (m *model) searchKey(k, text string) {
 // searchAgain is n, or N going back.
 func (m *model) searchAgain(back bool) {
 	if m.lastSearch == "" {
-		m.flash = m.keys.Say("search", "no search yet: %s finds a PR by number or title", "no search yet")
+		m.flash = m.keys.Say("search", "no search yet: %s finds a PR by number, issue or title", "no search yet")
 		return
 	}
 	ms := m.matches(m.lastSearch)
@@ -183,7 +196,7 @@ func (m *model) searchLine() string {
 	line := accent.Render("/") + text.Render(s.text) + blue.Render("▏")
 	switch n := len(m.matches(s.text)); {
 	case s.text == "":
-		line += faint.Render("  a PR number, or words from its title or author  ·  ⏎ search  esc cancel")
+		line += faint.Render("  a PR or issue number, or words from its title or author  ·  ⏎ search  esc cancel")
 	case n == 0:
 		line += red.Render("  no match") + faint.Render("  ·  esc cancel")
 	default:

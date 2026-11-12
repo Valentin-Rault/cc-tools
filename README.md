@@ -54,8 +54,8 @@ your threads, comments), the ones that need you again first; `⏎` there opens o
 PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen, and so does `?`: every
 key, the ones that do nothing where you are dimmed. The key help under the lists keeps to `⏎`, search and `?`.
 
-`/` finds a PR, the vim way: type its number (all of it or some digits, `#` optional) or words from its title or
-its author's login. The cursor goes to the first match below it as you type, switching list when the match is in
+`/` finds a PR, the vim way: type its number (all of it or some digits, `#` optional), the number of an issue its
+title names (`2754` for `FDN-2754`), or words from its title or its author's login. The cursor goes to the first match below it as you type, switching list when the match is in
 another; `⏎` keeps the search, `esc` goes back. `n` and `N` then go to the next and previous match, round all three
 lists, and the matches' numbers stay highlighted until `esc`.
 

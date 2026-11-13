@@ -10,6 +10,10 @@
 //! existing tabs: break_panes_to_tab_with_id and _with_index both check the number they're given against the tabs'
 //! positions, then put the pane in the tab with that ID, so they work only while a tab's ID is also a position, which
 //! stops once tabs have been closed. Replacing a pane with an existing one works across tabs.
+//!
+//! The placeholder must be a tiled pane zellij shows: replace_pane_with_existing_pane takes the pane out of its tab
+//! first, and drops it when the placeholder is collapsed in a stack. pr-watch opens the placeholder as a split, which
+//! stays out of stacks, and doesn't ask for a move whose placeholder isn't such a pane.
 
 use std::collections::{BTreeMap, VecDeque};
 use zellij_tile::prelude::*;

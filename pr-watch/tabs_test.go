@@ -72,15 +72,17 @@ func TestPlan(t *testing.T) {
 	}
 }
 
-// fakeZellij answers zellij pipe like the plugin, list-tabs with tabs, and new-pane with pane 90. It records the
-// payloads it was piped in calls, and the new-pane commands in calls.new.
+// fakeZellij answers zellij pipe like the plugin, list-tabs with tabs, new-pane with pane 90, and list-panes with the
+// file panes beside calls: pane 90, a plain pane. It records the payloads it was piped in calls, and the new-pane
+// commands in calls.new.
 func fakeZellij(t *testing.T, answer, tabs string) (plugin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
 	plugin = filepath.Join(dir, "pr-watch-tabs.wasm")
 	os.WriteFile(plugin, []byte("wasm"), 0o644)
 	calls = filepath.Join(dir, "calls")
-	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; echo terminal_90; exit;;\nesac\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
+	os.WriteFile(filepath.Join(dir, "panes"), []byte(`[{"id":90}]`), 0o644)
+	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nlist-panes) cat \""+dir+"/panes\"; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; echo terminal_90; exit;;\nesac\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	return plugin, calls
 }
@@ -103,7 +105,7 @@ func TestArrange(t *testing.T) {
 	if got, _ := os.ReadFile(calls); string(got) != "z 12 90 In review\n--\n" {
 		t.Errorf("zellij pipe calls %q", got)
 	}
-	if got, _ := os.ReadFile(calls + ".new"); !strings.Contains(string(got), "new-pane --tab-id 6 --no-focus") {
+	if got, _ := os.ReadFile(calls + ".new"); !strings.Contains(string(got), "new-pane --tab-id 6 --direction down --no-focus") {
 		t.Errorf("the placeholder in In review: %q", got)
 	}
 	if p := store.TabsPlaced(); p["a"] != "" || p["b"] != stageWIP {
@@ -130,6 +132,22 @@ func TestArrangeAsksOncePerZellijSessionInStageOrder(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(calls + ".new"); strings.Count(string(got), "new-pane") != 1 || !strings.Contains(string(got), "--tab-id 5 ") {
 		t.Errorf("one placeholder, in the first WIP tab: %q", got)
+	}
+}
+
+// A placeholder collapsed in a stack would lose the session's pane: the plugin isn't asked, and the move counts as a
+// try that didn't happen.
+func TestArrangeLeavesAPaneWhosePlaceholderIsInAStack(t *testing.T) {
+	plugin, calls := fakeZellij(t, "queued 1", `[{"name":"In review","tab_id":6}]`)
+	os.WriteFile(filepath.Join(filepath.Dir(calls), "panes"), []byte(`[{"id":90,"is_suppressed":true}]`), 0o644)
+	tries := map[string]int{}
+	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}}}
+	asked, _, err := arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, tries)
+	if err != nil || len(asked) != 1 || tries["a"] != 1 {
+		t.Fatalf("asked %v, tries %v, err %v", asked, tries, err)
+	}
+	if got, err := os.ReadFile(calls); err == nil {
+		t.Errorf("the plugin was asked: %q", got)
 	}
 }
 

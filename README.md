@@ -205,7 +205,8 @@ along, renamed. zellij's command line can't move a pane to another tab, so there
 (`zellij-tabs/`, Rust built for `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
 `zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`. In zellij 0.45.1 the plugin API
 can't move a pane into most existing tabs either, so pr-watch opens a placeholder pane in the tab, without focus, and
-the plugin swaps the session's pane in for it.
+the plugin swaps the session's pane in for it. The placeholder is a split, so in a tab where you stacked the panes the
+session lands beside the stack, not in it: zellij loses a pane swapped in for one collapsed in a stack.
 
 ### Plugins
 

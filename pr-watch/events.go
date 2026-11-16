@@ -84,9 +84,13 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 			Base: n.BaseRefName, Mergeable: n.Mergeable, Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
 		if len(n.Commits.Nodes) > 0 {
 			if ci := n.Commits.Nodes[0].Commit.StatusCheckRollup; ci != nil {
+				checks := current(ci.Contexts.Nodes)
 				p.CI = ci.State
-				for _, c := range ci.Contexts.Nodes {
-					if slices.Contains(failedConclusions, cmp.Or(c.Conclusion, c.State)) {
+				if len(checks) < len(ci.Contexts.Nodes) { // GitHub's state still counts the runs left out
+					p.CI = rollup(checks)
+				}
+				for _, c := range checks {
+					if failed(c) {
 						p.Failing = append(p.Failing, cmp.Or(c.Name, c.Context))
 					}
 				}
@@ -111,6 +115,49 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 		prs = append(prs, p)
 	}
 	return prs
+}
+
+// current leaves out the runs a workflow's concurrency group cancelled for another run on the same commit. Pushing a
+// stacked PR together with the PR under it starts its workflows twice on the one commit; the group cancels one of
+// the two, either one, and that run's cancelled jobs, and a gate job that needed them, stay in GitHub's rollup as
+// failures for good. A cancelled run with no other run of its workflow beside it still counts.
+func current(checks []checkNode) []checkNode {
+	cancelled := map[workflowRun]bool{} // the runs on this commit, and whether one of a run's jobs was cancelled
+	for _, c := range checks {
+		if r := c.run(); r != nil {
+			cancelled[*r] = cancelled[*r] || c.Conclusion == "CANCELLED"
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(checks), func(c checkNode) bool {
+		r := c.run()
+		if r == nil || !cancelled[*r] {
+			return false
+		}
+		for other, was := range cancelled {
+			if other.Workflow == r.Workflow && other != *r && !was {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// rollup works GitHub's state out for the checks current kept: failed when one failed, pending while one runs.
+func rollup(checks []checkNode) string {
+	state := "SUCCESS"
+	for _, c := range checks {
+		if failed(c) {
+			return "FAILURE"
+		}
+		if c.Context == "" && c.Status != "COMPLETED" || c.State == "PENDING" || c.State == "EXPECTED" {
+			state = "PENDING"
+		}
+	}
+	return state
+}
+
+func failed(c checkNode) bool {
+	return slices.Contains(failedConclusions, cmp.Or(c.Conclusion, c.State))
 }
 
 // diff compares the last snapshot with a fresh search and returns the new events, in search order.

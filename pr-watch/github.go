@@ -27,7 +27,8 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
     id number title url isDraft headRefName headRefOid baseRefName mergeable reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
-      ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
+      ... on CheckRun { name status conclusion checkSuite { workflowRun { databaseId workflow { databaseId } } } }
+      ... on StatusContext { context state } } } } } } }
     reviews(last: 20) { nodes { id state url bodyText author { login } } }
     comments(last: 20) { nodes { id url author { login } } }
   } } }
@@ -70,15 +71,32 @@ type prNode struct {
 			Commit struct {
 				StatusCheckRollup *struct {
 					State    string
-					Contexts struct {
-						Nodes []struct{ Name, Conclusion, Context, State string }
-					}
+					Contexts struct{ Nodes []checkNode }
 				}
 			}
 		}
 	}
 	Reviews  struct{ Nodes []itemNode }
 	Comments struct{ Nodes []itemNode }
+}
+
+// checkNode is a check run (Name, Status, Conclusion, and the workflow run it's a job of, when Actions ran it) or a
+// commit status (Context, State).
+type checkNode struct {
+	Name, Status, Conclusion, Context, State string
+	CheckSuite                               *struct{ WorkflowRun *workflowRun }
+}
+
+type workflowRun struct {
+	DatabaseID int
+	Workflow   struct{ DatabaseID int }
+}
+
+func (c checkNode) run() *workflowRun {
+	if c.CheckSuite == nil {
+		return nil
+	}
+	return c.CheckSuite.WorkflowRun
 }
 
 type itemNode struct {

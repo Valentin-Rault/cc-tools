@@ -98,7 +98,9 @@ prompt:
   out, or in a new one next to `repo_dir` (`<repo_dir>-pr-<n>`) when none has.
 
 When something happens on a PR (CI fails, it gets merge conflicts, changes are requested, a review or comment
-arrives, it leaves the merge queue), pr-watch sends the owner one message per PR. An approval is only shown, marked *for you*, with the first line
+arrives, it leaves the merge queue), pr-watch sends the owner one message per PR. A workflow run cancelled for another run
+of the same workflow on the same commit isn't a CI failure: pushing a stacked PR with the one under it starts its
+workflows twice, and the concurrency group cancels one. An approval is only shown, marked *for you*, with the first line
 of its comment: press `s` on it if the comment asks for something and it should go to the session. Only a Claude session can call `SendMessage`, so pr-watch
 starts a headless one for each send:
 

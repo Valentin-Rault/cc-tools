@@ -18,7 +18,7 @@ import (
 const epoch = "Thu, 01 Jan 1970 00:00:00 GMT"
 
 // backgroundRefresh: GitHub doesn't notify you about your own actions (your review, your merge), so pr-watch also
-// refreshes this often whatever happens. One refresh costs about 13 of GraphQL's 5000 points an hour.
+// refreshes this often whatever happens. One refresh costs about 20 of GraphQL's 5000 points an hour.
 const backgroundRefresh = 5 * time.Minute
 
 // ReviewRequest is someone else's PR waiting for your review.
@@ -321,8 +321,8 @@ func reviewRequests(nodes []reviewNode, reviewed []ReviewedPR, me, team string, 
 				r.TeamSize = mine[r.Teams[0]]
 			}
 			r.CI = "NONE"
-			if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
-				r.CI = n.Commits.Nodes[0].Commit.StatusCheckRollup.State
+			if len(n.Commits.Nodes) > 0 {
+				r.CI, _ = ciState(n.Commits.Nodes[0].Commit.StatusCheckRollup)
 			}
 			if n.MergeQueueEntry != nil {
 				r.QueuePosition = max(1, n.MergeQueueEntry.Position)

@@ -83,18 +83,7 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 		p := PR{NodeID: n.ID, Number: n.Number, Title: n.Title, URL: n.URL, Branch: n.HeadRefName, Head: n.HeadRefOid,
 			Base: n.BaseRefName, Mergeable: n.Mergeable, Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
 		if len(n.Commits.Nodes) > 0 {
-			if ci := n.Commits.Nodes[0].Commit.StatusCheckRollup; ci != nil {
-				checks := current(ci.Contexts.Nodes)
-				p.CI = ci.State
-				if len(checks) < len(ci.Contexts.Nodes) { // GitHub's state still counts the runs left out
-					p.CI = rollup(checks)
-				}
-				for _, c := range checks {
-					if failed(c) {
-						p.Failing = append(p.Failing, cmp.Or(c.Name, c.Context))
-					}
-				}
-			}
+			p.CI, p.Failing = ciState(n.Commits.Nodes[0].Commit.StatusCheckRollup)
 		}
 		other := func(it itemNode) (Item, bool) {
 			who := login(it.Author)
@@ -115,6 +104,25 @@ func normalize(nodes []prNode, me string, ignore []string) []PR {
 		prs = append(prs, p)
 	}
 	return prs
+}
+
+// ciState is a commit's check state, NONE without checks, and the names of the checks that failed. Cancelled runs
+// that another run of their workflow replaced don't count (current).
+func ciState(r *checkRollup) (state string, failing []string) {
+	if r == nil {
+		return "NONE", nil
+	}
+	checks := current(r.Contexts.Nodes)
+	state = r.State
+	if len(checks) < len(r.Contexts.Nodes) { // GitHub's state still counts the runs left out
+		state = rollup(checks)
+	}
+	for _, c := range checks {
+		if failed(c) {
+			failing = append(failing, cmp.Or(c.Name, c.Context))
+		}
+	}
+	return state, failing
 }
 
 // current leaves out the runs a workflow's concurrency group cancelled for another run on the same commit. Pushing a

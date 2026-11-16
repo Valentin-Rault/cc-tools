@@ -23,18 +23,21 @@ type GitHub interface {
 	Teams(owner, me string) (map[string]int, error)        // your teams at the repo's owner, by slug, with their sizes
 }
 
+// checkFields reads a commit's rollup with each check, and the workflow run a check is a job of (checkRollup).
+const checkFields = `statusCheckRollup { state contexts(first: 100) { nodes {
+      ... on CheckRun { name status conclusion checkSuite { workflowRun { databaseId workflow { databaseId } } } }
+      ... on StatusContext { context state } } } }`
+
 const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
     id number title url isDraft headRefName headRefOid baseRefName mergeable reviewDecision mergeQueueEntry { state }
-    commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
-      ... on CheckRun { name status conclusion checkSuite { workflowRun { databaseId workflow { databaseId } } } }
-      ... on StatusContext { context state } } } } } } }
+    commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
     reviews(last: 20) { nodes { id state url bodyText author { login } } }
     comments(last: 20) { nodes { id url author { login } } }
   } } }
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     number title url isDraft createdAt additions deletions author { login } mergeQueueEntry { position }
-    commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
     reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { ... on Team { slug } ... on User { login } } } }
     latestOpinionatedReviews(first: 20) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
@@ -68,16 +71,17 @@ type prNode struct {
 	MergeQueueEntry *struct{ State string }
 	Commits         struct {
 		Nodes []struct {
-			Commit struct {
-				StatusCheckRollup *struct {
-					State    string
-					Contexts struct{ Nodes []checkNode }
-				}
-			}
+			Commit struct{ StatusCheckRollup *checkRollup }
 		}
 	}
 	Reviews  struct{ Nodes []itemNode }
 	Comments struct{ Nodes []itemNode }
+}
+
+// checkRollup is a commit's checks, and their state as GitHub rolls them up.
+type checkRollup struct {
+	State    string
+	Contexts struct{ Nodes []checkNode }
 }
 
 // checkNode is a check run (Name, Status, Conclusion, and the workflow run it's a job of, when Actions ran it) or a
@@ -113,7 +117,7 @@ type reviewNode struct {
 	MergeQueueEntry       *struct{ Position int }
 	Commits               struct {
 		Nodes []struct {
-			Commit struct{ StatusCheckRollup *struct{ State string } }
+			Commit struct{ StatusCheckRollup *checkRollup }
 		}
 	}
 	ReviewRequests struct {

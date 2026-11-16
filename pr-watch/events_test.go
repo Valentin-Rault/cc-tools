@@ -72,6 +72,19 @@ func TestCancelledTwinRunsAreNoFailure(t *testing.T) {
 	}
 }
 
+// Someone else's stacked PR waiting for your review: its cancelled twin runs don't make To review show it failing.
+func TestToReviewLeavesOutCancelledTwinRuns(t *testing.T) {
+	var n reviewNode
+	err := json.Unmarshal([]byte(`{"number": 7, "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE",
+	  "contexts": {"nodes": [`+join(append(slices.Clone(stackedPush), job("ci", "COMPLETED", "SUCCESS", 1, 101))...)+`]}}}}]}}`), &n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := reviewRequests([]reviewNode{n, {Number: 8}}, nil, "me", "", nil); r[0].CI != "SUCCESS" || r[1].CI != "NONE" {
+		t.Errorf("CI = %s and %s, want SUCCESS and NONE", r[0].CI, r[1].CI)
+	}
+}
+
 // A stacked push sends no ci-failed for the cancelled twin, and a real failure after it still gets sent.
 func TestStackedPushSendsOnlyTheRealFailure(t *testing.T) {
 	old := map[string]Stored{"12": {Head: "9f8e7d6", CI: "SUCCESS"}}

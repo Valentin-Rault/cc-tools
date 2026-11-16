@@ -10,6 +10,7 @@ import (
 
 // ReviewedPR is someone else's open PR you have reviewed, and what happened since your latest review.
 type ReviewedPR struct {
+	NodeID                     string // what approving it takes
 	Number                     int
 	Title, URL, Author, Branch string
 	Draft                      bool
@@ -44,7 +45,7 @@ func reviewedPRs(nodes []reviewedNode, me string, ignore []string) []ReviewedPR 
 		if n.Number == 0 {
 			continue
 		}
-		r := ReviewedPR{Number: n.Number, Title: n.Title, URL: n.URL, Author: login(n.Author), Branch: n.HeadRefName,
+		r := ReviewedPR{NodeID: n.ID, Number: n.Number, Title: n.Title, URL: n.URL, Author: login(n.Author), Branch: n.HeadRefName,
 			Draft: n.IsDraft, HeadOid: n.HeadRefOid, Verdict: "COMMENTED"}
 		for _, c := range n.Commits.Nodes {
 			r.Commits = append(r.Commits, c.Commit.Oid)

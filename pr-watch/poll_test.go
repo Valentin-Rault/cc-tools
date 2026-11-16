@@ -13,15 +13,17 @@ import (
 
 // fakeGitHub answers with canned state, like the fake gh the bash test.sh put on PATH.
 type fakeGitHub struct {
-	search    *searchData
-	notifs    *notifications
-	states    map[int]string // what States answers; a PR missing from it gets no answer
-	statesErr error
-	queueErr  error
-	queued    []string       // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
-	teams     map[string]int // what Teams answers
-	teamsErr  error
-	teamsAsks int
+	search     *searchData
+	notifs     *notifications
+	states     map[int]string // what States answers; a PR missing from it gets no answer
+	statesErr  error
+	queueErr   error
+	queued     []string // what the TUI asked: "enqueue <id> <head>" or "dequeue <id>"
+	approved   []string // "<id> <head>" for each Approve
+	approveErr error
+	teams      map[string]int // what Teams answers
+	teamsErr   error
+	teamsAsks  int
 }
 
 func (f *fakeGitHub) Teams(owner, me string) (map[string]int, error) {
@@ -42,6 +44,11 @@ func (f *fakeGitHub) Enqueue(prID, head string) error {
 func (f *fakeGitHub) Dequeue(prID string) error {
 	f.queued = append(f.queued, "dequeue "+prID)
 	return f.queueErr
+}
+
+func (f *fakeGitHub) Approve(prID, head string) error {
+	f.approved = append(f.approved, prID+" "+head)
+	return f.approveErr
 }
 
 func (f *fakeGitHub) Login() (string, error) { return "me", nil }

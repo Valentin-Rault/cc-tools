@@ -34,11 +34,14 @@ func (m *model) View() tea.View {
 	switch {
 	case m.search != nil:
 		help = m.searchLine()
-	case m.picker == nil && !m.showKeys && m.themePick == nil && m.keys.First("help") != "": // the clue to every other key
+	case m.picker == nil && m.approving == nil && !m.showKeys && m.themePick == nil && m.keys.First("help") != "": // the clue to every other key
 		help += "  " + blue.Render(m.keys.First("help")) + faint.Render(" all keys")
 	}
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
+	}
+	if m.approving != nil {
+		lines = m.overlayApprove(lines, w)
 	}
 	if m.showKeys {
 		lines = m.overlayKeys(lines, w)
@@ -641,6 +644,44 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 	return floatOver(lines, box, w, bw)
 }
 
+// overlayApprove asks before approving: the PR, the commit it would approve, your last verdict, and what came since.
+func (m *model) overlayApprove(lines []string, w int) []string {
+	r := m.approving
+	bw := min(w-4, 76)
+	v := verdicts[r.Verdict]
+	var since []string
+	switch {
+	case r.NewCommits > 0:
+		since = append(since, yellow.Render(plural(r.NewCommits, "new commit", "new commits")))
+	case r.NewCommits < 0:
+		since = append(since, yellow.Render("rebased"))
+	default:
+		since = append(since, faint.Render("no new commits"))
+	}
+	if r.Replies > 0 {
+		since = append(since, cyan.Render(plural(r.Replies, "reply", "replies")+" in your threads"))
+	}
+	if r.Comments > 0 {
+		since = append(since, cyan.Render(plural(r.Comments, "comment", "comments")))
+	}
+	field := func(name string, value string) string { return " " + faint.Render(cell(name, 8)) + value }
+	sub := "by " + r.Author
+	if r.Draft {
+		sub = "draft · " + sub
+	}
+	inner := []string{
+		" " + text.Render(r.Title) + faint.Render("  "+sub),
+		"",
+		field("at", text.Render(r.HeadOid[:min(7, len(r.HeadOid))])+faint.Render("  its head when pr-watch last looked")),
+		field("you", v.style.Render(v.glyph)+text2.Render(" "+v.label+" "+ago(time.Since(r.ReviewedAt))+" ago")),
+		field("since", strings.Join(since, gutter.Render(", "))),
+		"",
+		" " + blue.Render("y") + text.Render(" approve") + "   " + blue.Render("n") + faint.Render(" or ") + blue.Render("esc") + text.Render(" cancel"),
+	}
+	box := frame(accent.Render(fmt.Sprintf("Approve #%d?", r.Number)), append(append([]string{""}, inner...), ""), bw, len(inner)+4, true)
+	return floatOver(lines, box, w, bw)
+}
+
 // floatOver dims the screen and lays box, bw wide, over it: centred, near the top.
 func floatOver(lines, box []string, w, bw int) []string {
 	out := make([]string, len(lines))
@@ -674,6 +715,8 @@ func (m *model) help() string {
 	switch {
 	case m.picker != nil:
 		return " ↑↓ move  ⏎ choose  esc cancel"
+	case m.approving != nil:
+		return " y approve  n or esc cancel"
 	case m.showKeys:
 		return " " + m.keys.Say("help", "%s or esc close", "esc close")
 	case m.themePick != nil:

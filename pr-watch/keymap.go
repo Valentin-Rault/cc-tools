@@ -28,6 +28,7 @@ var actions = []keymap.Action{
 	{Name: "open", Keys: []string{"enter"}, Does: "open the selected PR on GitHub"},
 	{Name: "details", Keys: []string{"e"}, Does: "details beside the lists"},
 	{Name: "queue", Keys: []string{"m"}, Does: "add your PR to the merge queue, or take it out"},
+	{Name: "approve", Keys: []string{"A"}, Does: "approve a PR you reviewed, after a y/n"},
 	{Name: "owner", Keys: []string{"o"}, Does: "pick the Claude session that owns the PR"},
 	{Name: "send", Keys: []string{"s"}, Does: "send the PR's waiting events to its owner"},
 	{Name: "go_to_owner", Keys: []string{"g"}, Does: "go to the owner's pane"},

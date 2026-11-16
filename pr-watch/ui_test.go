@@ -668,3 +668,69 @@ func TestMergeQueueToggle(t *testing.T) {
 		t.Errorf("m on someone else's PR: flash %q", m.flash)
 	}
 }
+
+// A asks before approving a PR you reviewed, shows the commit it would approve, and only y approves it, there.
+func TestApprove(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 120, 30
+	gh := &fakeGitHub{}
+	m.w.gh = gh
+	m.reviewed = []ReviewedPR{
+		{NodeID: "PR_r", Number: 2757, Title: "Cache warmup", Author: "carol", Verdict: "CHANGES_REQUESTED",
+			ReviewedAt: time.Now().Add(-3 * time.Hour), ReviewedOid: "old", HeadOid: "1234567890ab", NewCommits: 2, Replies: 1},
+		{NodeID: "PR_s", Number: 2758, Title: "Done already", Author: "dave", Verdict: "APPROVED", ReviewedOid: "h", HeadOid: "h"},
+	}
+	key := func(k string) tea.Cmd { _, cmd := m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k}); return cmd }
+
+	if key("A"); m.approving != nil || !strings.Contains(m.flash, "A approves a PR you reviewed: select one in Reviewed") {
+		t.Fatalf("A in My PRs: approving %v, flash %q", m.approving, m.flash)
+	}
+	press(m, "right", "right")
+	if got := keyDoes(m, "A"); got != "approve #2757, after a y/n" {
+		t.Errorf("? says A does %q", got)
+	}
+	key("A")
+	v := screen(m)
+	for _, want := range []string{"Approve #2757?", "Cache warmup  by carol", "at      1234567", "you     ◆ changes requested 3h ago",
+		"since   2 new commits, 1 reply in your threads", "y approve   n or esc cancel", " y approve  n or esc cancel"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("the y/n lacks %q:\n%s", want, v)
+		}
+	}
+	if key("j"); m.approving == nil || m.cursor[panelReviewed] != 0 { // other keys wait for y or n
+		t.Fatalf("j while asking: approving %v, cursor %d", m.approving, m.cursor[panelReviewed])
+	}
+	if key("n"); m.approving != nil || len(gh.approved) > 0 || m.flash != "#2757 not approved" {
+		t.Fatalf("n: approving %v, calls %q, flash %q", m.approving, gh.approved, m.flash)
+	}
+
+	key("A")
+	m.reviewed[0].HeadOid = "moved" // a refresh while it asks: it approves what it showed
+	cmd := key("y")
+	if cmd == nil || m.approving != nil {
+		t.Fatalf("y: no command, or still asking; flash %q", m.flash)
+	}
+	m.Update(cmd())
+	if !slices.Equal(gh.approved, []string{"PR_r 1234567890ab"}) || m.flash != "#2757 approved" || !m.polling {
+		t.Errorf("calls %q, flash %q, refreshing %v", gh.approved, m.flash, m.polling)
+	}
+
+	m.polling = false
+	gh.approveErr = errHeadMoved
+	key("A")
+	m.Update(key("y")())
+	if !strings.Contains(m.flash, "#2757 has new commits since pr-watch looked: not approved") || !m.polling {
+		t.Errorf("head moved: flash %q, refreshing %v", m.flash, m.polling)
+	}
+	gh.approveErr = errors.New("Can not approve your own pull request")
+	key("A")
+	m.Update(key("y")())
+	if m.flash != "#2757: Can not approve your own pull request" {
+		t.Errorf("flash = %q", m.flash)
+	}
+
+	press(m, "down") // #2758: you approved it as it is
+	if key("A"); m.approving != nil || m.flash != "you already approved #2758 as it is" {
+		t.Errorf("approving %v, flash %q", m.approving, m.flash)
+	}
+}

@@ -34,6 +34,10 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 			queue.does = fmt.Sprintf("take #%d out of the merge queue", sel)
 		}
 	}
+	approve := keyRow{m.keys.Label("approve"), "approve a PR you reviewed, after a y/n", p != panelReviewed || sel == 0}
+	if !approve.off {
+		approve.does = fmt.Sprintf("approve #%d, after a y/n", sel)
+	}
 	details := map[bool]string{true: "close the details", false: "details beside the lists"}[m.expanded]
 	auto := "switch to auto: send events as they come"
 	if m.auto {
@@ -59,6 +63,7 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 			panelReviewed: "open what changed since your review", panelEvents: "open the event's link"}[p], false},
 		keyRow{k("details"), details, false},
 		queue,
+		approve,
 		keyRow{k("owner"), "pick the Claude session that owns it", sel == 0},
 		keyRow{k("send"), "send its waiting events to the owner", sel == 0},
 		keyRow{k("go_to_owner"), "go to the owner's pane", sel == 0},

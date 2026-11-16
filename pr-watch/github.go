@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ type GitHub interface {
 	States(repo string, prs []int) (map[int]string, error) // OPEN, CLOSED or MERGED, by PR number
 	Enqueue(prID, head string) error                       // add a PR to its merge queue, if its head is still head
 	Dequeue(prID string) error                             // take it out again
+	Approve(prID, head string) error                       // approve someone's PR, if its head is still head
 	Teams(owner, me string) (map[string]int, error)        // your teams at the repo's owner, by slug, with their sizes
 }
 
@@ -42,7 +44,7 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
     latestOpinionatedReviews(first: 20) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
   reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
-    number title url isDraft headRefOid headRefName author { login }
+    id number title url isDraft headRefOid headRefName author { login }
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
     reviews(last: 10, author: $me) { nodes { state submittedAt commit { oid } } }
     commits(last: 50) { nodes { commit { oid } } }
@@ -136,6 +138,7 @@ type reviewNode struct {
 }
 
 type reviewedNode struct {
+	ID                                  string // the node ID the review mutation takes
 	Number                              int
 	Title, URL, HeadRefOid, HeadRefName string
 	IsDraft                             bool
@@ -283,6 +286,28 @@ func (c *ghClient) Enqueue(prID, head string) error {
 func (c *ghClient) Dequeue(prID string) error {
 	return c.gql.Do(`mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }`,
 		map[string]any{"id": prID}, &struct{}{})
+}
+
+// errHeadMoved: the PR has commits pr-watch hadn't seen when you said yes, so it approved nothing.
+var errHeadMoved = errors.New("the PR moved on since pr-watch last looked")
+
+// Approve submits an approving review on head, the commit you saw. GitHub takes a review on an older commit without
+// a word, and where stale approvals aren't dismissed it would count for commits you never looked at: so Approve
+// checks the PR's head first, and approves nothing when it moved on.
+func (c *ghClient) Approve(prID, head string) error {
+	var d struct{ Node *struct{ HeadRefOid string } }
+	err := c.gql.Do(`query($id: ID!) { node(id: $id) { ... on PullRequest { headRefOid } } }`, map[string]any{"id": prID}, &d)
+	switch {
+	case err != nil:
+		return err
+	case d.Node == nil:
+		return errors.New("GitHub doesn't know this PR")
+	case d.Node.HeadRefOid != head:
+		return errHeadMoved
+	}
+	return c.gql.Do(`mutation($id: ID!, $head: GitObjectID) {
+  addPullRequestReview(input: {pullRequestId: $id, commitOID: $head, event: APPROVE}) { pullRequestReview { state } }
+}`, map[string]any{"id": prID, "head": head}, &struct{}{})
 }
 
 // Notifications is a conditional request: GitHub answers 304 for free while nothing changed.

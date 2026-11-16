@@ -52,6 +52,10 @@ type (
 		queued bool // true: added to the merge queue; false: taken out
 		err    error
 	}
+	approvedMsg struct {
+		pr  int
+		err error
+	}
 )
 
 // The panels: the top area shows one of the three PR lists, the events panel sits below it.
@@ -94,10 +98,11 @@ type model struct {
 	leftAt, backAt                 time.Time // when you last left it and came back: what arrived in between is new
 	seenAt                         time.Time // the last sign you were looking: a key, or coming back to the pane
 
-	list   int  // which PR list is shown: panelMine or panelReview
-	inList bool // focus is on that list, not on the events
-	cursor [4]int
-	picker *picker
+	list      int  // which PR list is shown: panelMine or panelReview
+	inList    bool // focus is on that list, not on the events
+	cursor    [4]int
+	picker    *picker
+	approving *ReviewedPR // A is asking: approve this PR, as it was when you asked?
 
 	showKeys   bool    // ? floats every key over the screen
 	search     *search // / is open
@@ -375,6 +380,21 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.store.Hot() // look again soon, and keep watching while the queue works
 		}
 
+	case approvedMsg:
+		switch {
+		case errors.Is(msg.err, errHeadMoved):
+			m.flash = fmt.Sprintf("#%d has new commits since pr-watch looked: not approved, have a look at them first", msg.pr)
+		case msg.err != nil:
+			m.flash = fmt.Sprintf("#%d: %v", msg.pr, msg.err)
+		default:
+			m.flash = fmt.Sprintf("#%d approved", msg.pr)
+			m.log(msg.pr, "approved from pr-watch")
+		}
+		if (msg.err == nil || errors.Is(msg.err, errHeadMoved)) && !m.polling { // show your verdict, or the new commits
+			m.polling = true
+			return m, m.pollCmd(true)
+		}
+
 	case tea.FocusMsg:
 		now := time.Now()
 		if m.away && now.Sub(m.leftAt) < tabReturn {
@@ -389,6 +409,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.seenAt = time.Now()
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
+		}
+		if m.approving != nil {
+			return m, m.approveKey(msg.String())
 		}
 		if m.themePick != nil {
 			m.themeKey(msg.String())
@@ -500,6 +523,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		m.expanded = !m.expanded
 	case "queue":
 		return m, m.toggleQueue(m.selectedPR())
+	case "approve":
+		m.askApprove()
 	case "owner", "send", "go_to_owner":
 		pr := m.selectedPR()
 		if pr == 0 {
@@ -1057,4 +1082,42 @@ func (m *model) toggleQueue(pr int) tea.Cmd {
 		}
 		return queuedMsg{pr, true, gh.Enqueue(s.NodeID, s.Head)}
 	}
+}
+
+// askApprove opens the y/n on the PR you reviewed that's selected. pr-watch can't take an approval back, so it asks
+// first, and the y/n shows the commit it would approve: the head as pr-watch last saw it.
+func (m *model) askApprove() {
+	i := m.cursor[panelReviewed]
+	if m.panel() != panelReviewed || i >= len(m.reviewed) {
+		m.flash = m.keys.Say("approve", "%s approves a PR you reviewed: select one in Reviewed", "approving is for PRs you reviewed, in Reviewed")
+		return
+	}
+	r := m.reviewed[i] // a copy: a refresh while it asks doesn't change what you're saying yes to
+	switch {
+	case r.NodeID == "" || r.HeadOid == "":
+		m.flash = "pr-watch doesn't know this PR's ID yet" + m.keys.Say("refresh", ": refresh with %s first", ": wait for the next refresh")
+	case r.Verdict == "APPROVED" && r.ReviewedOid == r.HeadOid:
+		m.flash = fmt.Sprintf("you already approved #%d as it is", r.Number)
+	default:
+		m.approving = &r
+	}
+}
+
+// approveKey answers the y/n: y approves, n, esc, q or ctrl+c don't; any other key leaves it asking.
+func (m *model) approveKey(k string) tea.Cmd {
+	r := *m.approving
+	switch k {
+	case "y", "Y":
+		m.approving = nil
+		if m.w == nil || m.w.gh == nil {
+			return nil
+		}
+		gh := m.w.gh
+		m.flash = fmt.Sprintf("approving #%d…", r.Number)
+		return func() tea.Msg { return approvedMsg{r.Number, gh.Approve(r.NodeID, r.HeadOid)} }
+	case "n", "N", "esc", "q", "ctrl+c":
+		m.approving = nil
+		m.flash = fmt.Sprintf("#%d not approved", r.Number)
+	}
+	return nil
 }

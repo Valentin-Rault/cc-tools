@@ -12,7 +12,7 @@ const reviewedFixture = `[
   {"number": 11, "title": "Quiet one", "url": "https://gh/pr/11", "headRefOid": "h11", "author": {"login": "bob"},
    "reviews": {"nodes": [{"state": "CHANGES_REQUESTED", "submittedAt": "2026-01-02T10:00:00Z", "commit": {"oid": "h11"}}]},
    "commits": {"nodes": [{"commit": {"oid": "h11"}}]}},
-  {"number": 10, "title": "Busy one", "url": "https://gh/pr/10", "headRefOid": "d", "author": {"login": "alice"},
+  {"id": "PR_10", "number": 10, "title": "Busy one", "url": "https://gh/pr/10", "headRefOid": "d", "author": {"login": "alice"},
    "reviewRequests": {"nodes": [{"requestedReviewer": {"login": "me"}}, {"requestedReviewer": null}]},
    "reviews": {"nodes": [
      {"state": "COMMENTED", "submittedAt": "2026-01-01T09:00:00Z", "commit": {"oid": "a"}},
@@ -48,7 +48,7 @@ func TestReviewedPRs(t *testing.T) {
 		t.Fatalf("order = %v, want the ones needing you first and no draft-only review", order)
 	}
 	busy, forced, quiet := got[0], got[1], got[2]
-	if busy.Verdict != "APPROVED" || busy.ReviewedOid != "b" || busy.NewCommits != 2 || busy.Replies != 1 || busy.Comments != 1 || !busy.AskedAgain {
+	if busy.NodeID != "PR_10" || busy.Verdict != "APPROVED" || busy.ReviewedOid != "b" || busy.NewCommits != 2 || busy.Replies != 1 || busy.Comments != 1 || !busy.AskedAgain {
 		t.Errorf("busy = %+v", busy)
 	}
 	if busy.changesURL() != "https://gh/pr/10/files/b..d" {

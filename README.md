@@ -50,8 +50,12 @@ has waited, its latest events. `m` adds one of your PRs to the merge
 queue, at the commit you see; `m` on a queued one takes it out again, so a slip is one key to undo. pr-watch doesn't
 merge directly: that can't be undone. *Reviewed* lists the open PRs
 of others you've already reviewed, with your verdict and what happened since (asked again, new commits, replies in
-your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review. A
-PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen, and so does `?`: every
+your threads, comments), the ones that need you again first; `⏎` there opens only the changes since your review.
+`A` there approves the selected PR after a y/n that shows the commit it would approve: the head as pr-watch last saw
+it. An approval can't be taken back from pr-watch, so only `y` approves; `n` or `esc` cancels. If the PR has
+moved on since, pr-watch approves nothing and refreshes so you see the new commits first: GitHub would otherwise
+take an approval on the older commit, and where stale approvals aren't dismissed it would count for code you never
+saw. A PR is in one of those two lists, never both. The owner picker (`o`) floats over the screen, and so does `?`: every
 key, the ones that do nothing where you are dimmed. The key help under the lists keeps to `⏎`, search and `?`.
 
 `/` finds a PR, the vim way: type its number (all of it or some digits, `#` optional), the number of an issue its

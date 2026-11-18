@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"time"
 )
 
@@ -51,10 +52,19 @@ type sharedNameError struct{ note string }
 
 func (e sharedNameError) Error() string { return e.note }
 
+// ref is how ListAgents tells sessions apart, after their name: "widgets-b3 [e26e2a]". It isn't part of the name.
+var ref = regexp.MustCompile(`\s*\[[0-9a-f]{4,}\]$`)
+
+// bareName is a session's name without the ref a session may copy along with it from ListAgents.
+func bareName(name string) string { return ref.ReplaceAllString(name, "") }
+
+func isRef(s string) bool { return s != "" && ref.MatchString(s) && bareName(s) == "" }
+
 // claimant is who `pr-watch claim <name>` claims for: the session it runs in when that's the one named, by its ID,
 // since another session may have the same name; else the one live session called that. A name that two other
 // sessions share is refused rather than guessed.
 func claimant(sessions []Session, name, self string) (Owner, error) {
+	name = bareName(name)
 	var found []Session
 	for _, s := range sessions {
 		if s.Name != name {

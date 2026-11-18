@@ -77,7 +77,11 @@ func (s Store) Owners() map[int]Owner {
 			continue
 		}
 		if n, err := strconv.Atoi(f[0]); err == nil {
-			owners[n] = Owner{Name: f[1], SessionID: strings.Join(f[2:], "")}
+			o := Owner{Name: bareName(f[1]), SessionID: strings.Join(f[2:], "")}
+			if isRef(o.SessionID) { // a claim made as "name [ref]": the ref isn't the session's ID
+				o.SessionID = ""
+			}
+			owners[n] = o
 		}
 	}
 	return owners

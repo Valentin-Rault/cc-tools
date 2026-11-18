@@ -36,7 +36,7 @@ func main() {
 			}
 			prs = append(prs, n)
 		}
-		owner := Owner{Name: args[1]}
+		owner := Owner{Name: bareName(args[1])}
 		if sessions, err := liveSessions(); err == nil {
 			// run from a session (as Claude does), it claims for that one: another may have the same name
 			if owner, err = claimant(sessions, args[1], os.Getenv("CLAUDE_CODE_SESSION_ID")); err != nil {

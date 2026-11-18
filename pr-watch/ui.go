@@ -889,13 +889,35 @@ func (m *model) dropEvents(match func(Event) bool) int {
 // so those PRs stay routed once their session renames itself.
 func (m *model) pinOwners() {
 	for pr, o := range m.owners {
-		if s, ok := findSession(m.sessions, o.Name); ok && o.SessionID == "" && twins(m.sessions, o.Name) == 1 {
+		if s, ok := m.claimedSession(pr, o.Name); ok && o.SessionID == "" {
 			if err := m.store.Claim(Owner{Name: o.Name, SessionID: s.SessionID}, []int{pr}); err != nil {
 				m.flash = "recording the owner's session: " + err.Error()
 			}
 		}
 	}
 	m.owners = m.store.Owners()
+}
+
+// claimedSession is the live session a claim made by name only is for: the one with that name or, when two have it,
+// the one Claude Code links the PR to. Otherwise it could be either, and stays unpinned.
+func (m *model) claimedSession(pr int, name string) (Session, bool) {
+	var found []Session
+	for _, s := range m.sessions {
+		if s.Name == name {
+			found = append(found, s)
+		}
+	}
+	if len(found) == 1 {
+		return found[0], true
+	}
+	if l, ok := m.links[pr]; ok {
+		for _, s := range found {
+			if s.SessionID == l.SessionID {
+				return s, true
+			}
+		}
+	}
+	return Session{}, false
 }
 
 func (m *model) savePending() {

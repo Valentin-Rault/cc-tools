@@ -109,3 +109,39 @@ func TestPickerWarnsAboutTwins(t *testing.T) {
 		t.Errorf("%d warned:\n%s", warned, v)
 	}
 }
+
+// A session that copies its name from ListAgents copies its ref too ("widgets-fd [d1b006]"), and a claim under
+// that name reached no session: its PR showed its owner as not running. The ref is dropped, from a new claim and
+// from one already stored, and the claim gets pinned to the live session.
+func TestClaimsDropTheRef(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.write("owners", "4121 widgets-fd[d1b006]\n4122 feat-x [d1b006]\n")
+	if o := store.Owners(); o[4121] != (Owner{Name: "widgets-fd"}) || o[4122] != (Owner{Name: "feat-x"}) {
+		t.Fatalf("owners read as %+v", o)
+	}
+	m := newModel(Config{}, store, &Watcher{}, nil)
+	m.prs = map[string]Stored{"4121": {Title: "Patch follow-redirects"}}
+	m.Update(sessionsMsg{sessions: []Session{{Name: "widgets-fd", SessionID: "id-fd"}, {Name: "feat-x", SessionID: "id-x"}}})
+	if o := store.Owners(); o[4121] != (Owner{"widgets-fd", "id-fd"}) || o[4122] != (Owner{"feat-x", "id-x"}) {
+		t.Errorf("not pinned: %+v", o)
+	}
+	m.width, m.height = 140, 20
+	if v := screen(m); !strings.Contains(v, "● widgets-fd") || strings.Contains(v, "not running") {
+		t.Errorf("#4121's owner:\n%s", v)
+	}
+	if o, err := claimant(m.sessions, "widgets-fd [d1b006]", "id-fd"); err != nil || o != (Owner{"widgets-fd", "id-fd"}) {
+		t.Errorf("a claim with the ref: %+v, %v", o, err)
+	}
+}
+
+// When two live sessions have a name-only claim's name, the one Claude Code links the PR to is the one it's for.
+func TestNameOnlyClaimsPinTheLinkedTwin(t *testing.T) {
+	store := Store{Dir: t.TempDir()}
+	store.write("owners", "4121 widgets-fd[d1b006]\n")
+	m := newModel(Config{}, store, &Watcher{}, nil)
+	m.links = map[int]prLink{4121: {SessionID: "id-b"}}
+	m.Update(sessionsMsg{sessions: []Session{{Name: "widgets-fd", SessionID: "id-a"}, {Name: "widgets-fd", SessionID: "id-b"}}})
+	if o := store.Owners()[4121]; o != (Owner{"widgets-fd", "id-b"}) {
+		t.Errorf("owner %+v, want the linked one", o)
+	}
+}

@@ -501,6 +501,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		m.cursor[m.panel()] = max(0, m.cursor[m.panel()]-1)
 	case "down":
 		m.cursor[m.panel()] = max(0, min(m.rows(m.panel())-1, m.cursor[m.panel()]+1))
+	case "yank":
+		return m, m.yank()
 	case "open":
 		if url := m.selectedURL(); url != "" {
 			exec.Command("open", url).Start()
@@ -983,6 +985,64 @@ func (m *model) selectedPR() int {
 		}
 	}
 	return 0
+}
+
+// prURL is the link to a PR pr-watch lists: yours, one to review, or one you reviewed.
+func (m *model) prURL(pr int) string {
+	if s, ok := m.prs[strconv.Itoa(pr)]; ok {
+		return s.URL
+	}
+	for _, r := range m.toReview {
+		if r.Number == pr {
+			return r.URL
+		}
+	}
+	for _, r := range m.reviewed {
+		if r.Number == pr {
+			return r.URL
+		}
+	}
+	return ""
+}
+
+// yankable is the PR the focused row is about, in any of the lists or the events, and its link.
+func (m *model) yankable() (int, string) {
+	pr := m.selectedPR()
+	if i := m.cursor[panelReview]; m.panel() == panelReview && i < len(m.toReview) {
+		pr = m.toReview[i].Number
+	}
+	if pr == 0 {
+		return 0, ""
+	}
+	return pr, m.prURL(pr)
+}
+
+// yank is y: the selected PR's link goes to the clipboard, ready to paste. Without a clipboard command it goes
+// through the terminal (OSC 52), which most terminals, zellij, and tmux with set-clipboard on pass on.
+func (m *model) yank() tea.Cmd {
+	pr, url := m.yankable()
+	if url == "" {
+		m.flash = "select a PR, or an event, to copy its link"
+		return nil
+	}
+	m.flash = fmt.Sprintf("#%d's link copied: %s", pr, url)
+	if err := clipboard(url); err != nil {
+		return tea.SetClipboard(url)
+	}
+	return nil
+}
+
+// clipboard puts text on the system clipboard with the first of pbcopy, wl-copy and xclip there is; tests replace it.
+var clipboard = func(text string) error {
+	for _, c := range [][]string{{"pbcopy"}, {"wl-copy"}, {"xclip", "-selection", "clipboard"}} {
+		if _, err := exec.LookPath(c[0]); err != nil {
+			continue
+		}
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	}
+	return errors.New("no clipboard command")
 }
 
 func (m *model) selectedURL() string {

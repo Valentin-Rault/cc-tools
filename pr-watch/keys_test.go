@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,7 +37,7 @@ func TestKeysPopup(t *testing.T) {
 	typeIn(m, "?")
 	v := screen(m)
 	for _, want := range []string{"Keys", "a PR by number, issue, title or author", "pick the Claude session that owns it",
-		"take #2740 out of the merge queue", "switch to manual: hold events until s", "? or esc close"} {
+		"take #2740 out of the merge queue", "copy its link", "? or esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the popup lacks %q:\n%s", want, v)
 		}
@@ -118,4 +120,42 @@ func lineWith(screen string, all ...string) bool {
 		}
 	}
 	return false
+}
+
+// y copies the link of the PR the focused row is about, in each list and on an event; with no clipboard command it
+// goes through the terminal. a does nothing unless you bind it.
+func TestYankAndNoAutoKey(t *testing.T) {
+	m := testModel(t)
+	var copied []string
+	failing := false
+	was := clipboard
+	t.Cleanup(func() { clipboard = was })
+	clipboard = func(text string) error {
+		if failing {
+			return errors.New("no clipboard command")
+		}
+		copied = append(copied, text)
+		return nil
+	}
+	for n, s := range m.prs {
+		s.URL = "https://gh/pr/" + n
+		m.prs[n] = s
+	}
+	press(m, "y")                // #2740, first in My PRs
+	press(m, "right", "y")       // #2711, to review
+	press(m, "left", "tab", "y") // the newest event is #2740's
+	if want := []string{"https://gh/pr/2740", "https://gh/pr/2711", "https://gh/pr/2740"}; !slices.Equal(copied, want) {
+		t.Errorf("copied %q, want %q", copied, want)
+	}
+	if m.flash != "#2740's link copied: https://gh/pr/2740" {
+		t.Errorf("flash %q", m.flash)
+	}
+	failing = true
+	if _, cmd := m.key("y"); cmd == nil {
+		t.Error("without a clipboard command it should go through the terminal")
+	}
+	press(m, "a")
+	if !m.auto {
+		t.Error("a switched to manual: it has no key")
+	}
 }

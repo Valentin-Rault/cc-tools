@@ -92,7 +92,7 @@ func TestKeyListInTheConfig(t *testing.T) {
 func TestRemappedKeysInTheTUI(t *testing.T) {
 	m := testModel(t)
 	m.width, m.height = 150, 34
-	m.keys = keysFrom(t, `{"keys": {"queue": "", "send": "S", "help": "H", "down": ["J"], "search": "f", "owner": "O"}}`)
+	m.keys = keysFrom(t, `{"keys": {"queue": "", "send": "S", "help": "H", "down": ["J"], "search": "f", "owner": "O", "auto": "a"}}`)
 
 	press(m, "J")
 	if m.cursor[panelMine] != 1 {

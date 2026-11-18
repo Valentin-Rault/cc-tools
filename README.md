@@ -79,7 +79,10 @@ it if the session can't start.
 
 Keep it open in a terminal tab, a zellij tab or a tmux window while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
 the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the
-list and the events, and `⏎` opens the selected PR in the browser.
+list and the events, and `⏎` opens the selected PR in the browser. `y` copies its link instead, the way vim yanks,
+ready to paste; on an event, the link to its PR. It uses `pbcopy` (or `wl-copy`, `xclip`), else the terminal's
+clipboard (OSC 52), which zellij, and tmux with `set-clipboard on`, pass on. Events go out as they come; the `auto`
+action holds them until `s` and has no key unless you give it one in `"keys"`.
 
 **What's new.** Coming back to pr-watch's pane, what happened while you were away is marked ✦: on its line in the
 events, before its PR, as a count on each list and in the status line, above a line saying since when. The marks

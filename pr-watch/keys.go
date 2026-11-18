@@ -27,6 +27,7 @@ var panelNames = map[int]string{panelMine: "My PRs", panelReview: "To review", p
 // Each row names the keys bound to its actions (keymap.go); an action that's off has no row.
 func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 	p, sel := m.panel(), m.selectedPR()
+	_, link := m.yankable()
 	queue := keyRow{m.keys.Label("queue"), "add your PR to the merge queue, or take it out", p != panelMine || sel == 0}
 	if !queue.off {
 		queue.does = fmt.Sprintf("add #%d to the merge queue", sel)
@@ -61,6 +62,7 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 	pr = group("The selected PR",
 		keyRow{k("open"), map[int]string{panelMine: "open it on GitHub", panelReview: "open it for review",
 			panelReviewed: "open what changed since your review", panelEvents: "open the event's link"}[p], false},
+		keyRow{k("yank"), "copy its link", link == ""},
 		keyRow{k("details"), details, false},
 		queue,
 		approve,

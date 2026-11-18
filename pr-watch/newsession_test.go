@@ -191,3 +191,21 @@ func TestNewSessionWithNothingTyped(t *testing.T) {
 		t.Error("esc didn't just close the form")
 	}
 }
+
+// A PR's key starts a session to review it, in the Reviewing tab, its prompt naming the PR the way GitHub does.
+func TestNewSessionToReviewAPR(t *testing.T) {
+	t.Setenv("PR_WATCH_CLAUDE", "/bin/sh")
+	m := testModel(t)
+	rec := &tabRecorder{}
+	m.mx, m.cfg.RepoDir, m.cfg.ArrangeTabs = rec, "/code/widgets", true
+	rolls(t, "5be")
+	typeIn(m, "c", "pr-2754", "tab", "review it")
+	m.width, m.height = 120, 24
+	if v := screen(m); !strings.Contains(v, "pr-2754-5b") || !strings.Contains(v, "a new pane in the Reviewing tab") {
+		t.Errorf("form:\n%s", v)
+	}
+	msg := enter(m)().(startedMsg)
+	if msg.name != "pr-2754-5b" || rec.title != "Reviewing" || rec.argv[len(rec.argv)-1] != "PR #2754: review it" {
+		t.Errorf("started %+v in %q: %q", msg, rec.title, rec.argv)
+	}
+}

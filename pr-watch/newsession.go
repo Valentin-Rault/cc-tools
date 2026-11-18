@@ -13,7 +13,7 @@ import (
 // c starts a Claude session on an issue. A form asks for the issue and, if you want, what to tell the session; ⏎
 // opens it in repo_dir, in a new pane of the WIP tab, named for the issue (fdn-3174-7c). It starts on whatever the
 // clone has checked out, like a session you start by hand, and makes its own worktree and branch. With nothing to
-// tell it, it waits for you.
+// tell it, it waits for you. A PR's key, pr-2754, starts a session to review it, in the Reviewing tab.
 
 // newSession is c's form.
 type newSession struct {
@@ -59,12 +59,28 @@ func (m *model) keepNameFree() {
 	}
 }
 
-// newSessionTab is the tab the session opens in: WIP with tabs arranged by stage, else one named for the issue.
+// newSessionTab is the tab the session opens in: with tabs arranged by stage, Reviewing for a PR (pr-2754) and WIP
+// for an issue; else one named for the key.
 func (m *model) newSessionTab(issue string) string {
-	if m.cfg.ArrangeTabs {
+	switch {
+	case m.cfg.ArrangeTabs && reviewKey(issue):
+		return stageReviewing
+	case m.cfg.ArrangeTabs:
 		return stageWIP
 	}
 	return cmp.Or(issue, m.newSessionName())
+}
+
+// reviewKey: the key is a PR's, pr-2754, typed to review it rather than to work on an issue.
+func reviewKey(issue string) bool { return strings.HasPrefix(issue, "PR-") }
+
+// promptLabel is what the opening prompt starts with: the issue, or the PR the way GitHub writes it (PR #2754), so
+// it isn't read as an issue of a project called PR.
+func promptLabel(issue string) string {
+	if n, ok := strings.CutPrefix(issue, "PR-"); ok {
+		return "PR #" + n
+	}
+	return issue
 }
 
 // newSessionKey edits the form: text is what the key types, if anything. Letters type, so j and k don't move.
@@ -134,7 +150,7 @@ func (m *model) startSession() tea.Cmd {
 	args := []string{"--session-id", id, "-n", name}
 	if p := strings.TrimSpace(s.prompt); p != "" {
 		if issue != "" {
-			p = issue + ": " + p
+			p = promptLabel(issue) + ": " + p
 		}
 		args = append(args, p)
 	}
@@ -177,7 +193,7 @@ func (m *model) overlayNewSession(lines []string, w int) []string {
 	}
 	issue, ok := typedIssue(s.issue)
 	inner := []string{
-		field("issue", input(s.issue, "FDN-3174, or nothing for a session on no issue", !s.onPrompt)),
+		field("issue", input(s.issue, "FDN-3174, pr-2754 to review a PR, or nothing for no issue", !s.onPrompt)),
 		field("prompt", input(s.prompt, "nothing: the session waits for you", s.onPrompt)),
 		"",
 	}

@@ -102,7 +102,7 @@ pr-watch claim <session name> <pr>...
 A pick or a claim wins over the link and records the session's ID, so the PR stays routed when the session renames
 itself. Run from a session, as Claude runs it, a claim is for that session, by its ID (`$CLAUDE_CODE_SESSION_ID`),
 even when another session has its name; from anywhere else, a name two running sessions share is refused rather
-than guessed. When the PR is merged or closed its owner is dropped; `x` also purges owners and undelivered events of
+than guessed. When the PR is merged or closed its owner is dropped; `X` also purges owners and undelivered events of
 PRs that aren't open anymore.
 
 **PRs you reviewed.** On someone else's PR you reviewed, new replies in your threads, comments, pushed commits and

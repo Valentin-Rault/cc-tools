@@ -46,9 +46,9 @@ func TestDefaultKeys(t *testing.T) {
 // A listed action's keys replace its defaults, "" turns it off, your key beats another action's default, a key you
 // give two actions does neither, and ctrl+c always quits.
 func TestKeymapRules(t *testing.T) {
-	km := keysFrom(t, `{"keys": {"queue": "", "send": ["S", "x"], "go_to_owner": ["g", "G"], "quit": "Q",
+	km := keysFrom(t, `{"keys": {"queue": "", "send": ["S", "X"], "go_to_owner": ["g", "G"], "quit": "Q",
 		"refresh": "z", "pause": "z", "details": "ctrl+c", "Open": "o", "down": ["J", "Down"]}}`)
-	cases := map[string]string{"m": "", "S": "send", "s": "", "x": "send", "g": "go_to_owner", "G": "go_to_owner",
+	cases := map[string]string{"m": "", "S": "send", "s": "", "X": "send", "x": "", "g": "go_to_owner", "G": "go_to_owner",
 		"Q": "quit", "q": "", "ctrl+c": "quit", "z": "", "e": "", "J": "down", "down": "down", "j": "", "o": "owner", "r": ""}
 	for k, want := range cases {
 		if got := km.Action[k]; got != want {
@@ -61,7 +61,7 @@ func TestKeymapRules(t *testing.T) {
 	for _, want := range []string{
 		`no action "Open" (pr-watch keys lists them)`,
 		"z is bound to pause and refresh: it does neither",
-		"x does send now, not purge",
+		"X does send now, not purge",
 		"purge has no key left",
 		"ctrl+c always quits, it can't do details",
 	} {
@@ -71,7 +71,7 @@ func TestKeymapRules(t *testing.T) {
 	}
 	var out bytes.Buffer
 	printKeys(&out, km)
-	for _, want := range []string{"queue          (off)", "send           S x *", "quit           Q ctrl+c *", "note: purge has no key left"} {
+	for _, want := range []string{"queue          (off)", "send           S X *", "quit           Q ctrl+c *", "note: purge has no key left"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("pr-watch keys lacks %q:\n%s", want, out.String())
 		}

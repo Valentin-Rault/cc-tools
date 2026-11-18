@@ -41,7 +41,7 @@ var actions = []keymap.Action{
 	{Name: "auto", Does: "switch between sending events as they come and holding them; no key unless you give it one"},
 	{Name: "pause", Keys: []string{"p"}, Does: "pause polling, or resume it"},
 	{Name: "refresh", Keys: []string{"r"}, Does: "refresh now"},
-	{Name: "purge", Keys: []string{"x"}, Does: "forget owners and events of closed PRs"},
+	{Name: "purge", Keys: []string{"X"}, Does: "forget owners and events of closed PRs"},
 	{Name: "theme", Keys: []string{"t"}, Does: "pick a theme"},
 	{Name: "help", Keys: []string{"?"}, Does: "every key"},
 	{Name: "quit", Keys: []string{"q", "ctrl+c"}, Does: "quit"},

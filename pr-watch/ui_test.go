@@ -199,7 +199,7 @@ func TestPurgeForgetsClosedPRs(t *testing.T) {
 	m := testModel(t)
 	m.store.Claim(Owner{Name: "old"}, []int{1999})
 	m.events = append(m.events, Event{PR: 1999, Text: "comment by x u", Status: NeedsOwner}, Event{PR: 1998, Text: "done", Status: Sent})
-	press(m, "x")
+	press(m, "X")
 	if _, ok := m.store.Owners()[1999]; ok {
 		t.Error("purge kept the owner of a closed PR")
 	}
@@ -482,7 +482,7 @@ func TestPickerResumesTheReviewSession(t *testing.T) {
 func TestPurgeKeepsReviewedPRs(t *testing.T) {
 	m := reviewingModel(t)
 	m.store.Claim(Owner{Name: "rev-a"}, []int{2757})
-	press(m, "x")
+	press(m, "X")
 	if _, ok := m.store.Owners()[2757]; !ok {
 		t.Error("purge dropped the owner of an open PR you reviewed")
 	}

@@ -103,6 +103,7 @@ type model struct {
 	cursor    [4]int
 	picker    *picker
 	approving *ReviewedPR // A is asking: approve this PR, as it was when you asked?
+	starting  *newSession // c's form is open
 
 	showKeys   bool    // ? floats every key over the screen
 	search     *search // / is open
@@ -365,6 +366,14 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = "jump: " + msg.err.Error()
 		}
 
+	case startedMsg:
+		return m, m.started(msg)
+
+	case tea.PasteMsg:
+		if m.starting != nil {
+			m.pasteNewSession(msg.Content)
+		}
+
 	case queuedMsg:
 		switch {
 		case msg.err != nil:
@@ -409,6 +418,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.seenAt = time.Now()
 		if m.picker != nil {
 			return m, m.pickerKey(msg.String())
+		}
+		if m.starting != nil {
+			return m, m.newSessionKey(msg.String(), msg.Text)
 		}
 		if m.approving != nil {
 			return m, m.approveKey(msg.String())
@@ -525,6 +537,8 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		return m, m.toggleQueue(m.selectedPR())
 	case "approve":
 		m.askApprove()
+	case "new_session":
+		m.openNewSession()
 	case "owner", "send", "go_to_owner":
 		pr := m.selectedPR()
 		if pr == 0 {
@@ -673,7 +687,7 @@ func (m *model) handOver(pr int, c choice) tea.Cmd {
 	}
 	info := m.prInfo(pr)
 	prev, hadPrev := m.owners[pr]
-	owner := Owner{Name: fmt.Sprintf("pr-%d", pr), SessionID: newUUID()}
+	owner := Owner{Name: prSessionName(pr, info.Title, m.sessions), SessionID: newUUID()}
 	if info.Reviewing {
 		owner.Name = fmt.Sprintf("review-%d", pr)
 	}

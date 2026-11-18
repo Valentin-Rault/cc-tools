@@ -68,7 +68,12 @@ func (m *model) keyGroups() (move, find, pr, watch keyGroup) {
 		keyRow{k("send"), "send its waiting events to the owner", sel == 0},
 		keyRow{k("go_to_owner"), "go to the owner's pane", sel == 0},
 	)
+	start := "start a Claude session on an issue, in a new tab"
+	if m.cfg.ArrangeTabs {
+		start = "start a Claude session on an issue, in the WIP tab"
+	}
 	watch = group("pr-watch",
+		keyRow{k("new_session"), start, m.mx == nil || m.cfg.RepoDir == ""},
 		keyRow{k("auto"), auto, false},
 		keyRow{k("pause"), pause, false},
 		keyRow{k("refresh"), "refresh now", false},

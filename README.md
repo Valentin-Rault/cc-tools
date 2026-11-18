@@ -63,6 +63,16 @@ title names (`2754` for `FDN-2754`), or words from its title or its author's log
 another; `⏎` keeps the search, `esc` goes back. `n` and `N` then go to the next and previous match, round all three
 lists, and the matches' numbers stay highlighted until `esc`.
 
+`c` starts a Claude session on an issue: type the issue (`FDN-3174` or `fdn-3174`) and, if you want, what to tell
+the session, and `⏎` opens it in `repo_dir`, in a new pane of the WIP tab (with `arrange_tabs`; else of a tab named
+for the issue). It starts on whatever the clone has checked out, like a session you start by hand, and makes its own
+worktree and branch. With nothing to tell it, it waits for you; what you do type reaches it after the issue
+(`FDN-3174: …`). Sessions message each other by name, and SendMessage refuses a name two live sessions share, which
+Claude's own names (the repo and 2 hex digits: 256 of them) often are. So the session is named for the issue with
+a random suffix no live session has, `fdn-3174-7c`, or with no issue after the repo with 3 hex digits, a shape
+Claude's names never have: `widgets-a41`. When the issue already has a live session, the form says so and `ctrl+g`
+goes to it instead.
+
 Keep it open in a terminal tab, a zellij tab or a tmux window while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
 the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the
 list and the events, and `⏎` opens the selected PR in the browser.
@@ -98,8 +108,10 @@ preselected) and, in zellij or tmux, two ways to start one in a new tab, with th
 prompt:
 
 - **resume the session that worked on it**: `claude --resume <its id>` in the folder it ran in, when it isn't running.
-- **new Claude session**: `claude --session-id <new id> -n pr-<n>` in the worktree that has the PR's branch checked
-  out, or in a new one next to `repo_dir` (`<repo_dir>-pr-<n>`) when none has.
+- **new Claude session**: `claude --session-id <new id> -n <name>` in the worktree that has the PR's branch checked
+  out, or in a new one next to `repo_dir` (`<repo_dir>-pr-<n>`) when none has. It's named for the issue the PR's
+  title names, the last key in it, with a random suffix no live session has (`fdn-2754-3e`), else `pr-<n>`; a
+  review session is `review-<n>`.
 
 When something happens on a PR (CI fails, it gets merge conflicts, changes are requested, a review or comment
 arrives, it leaves the merge queue), pr-watch sends the owner one message per PR. A workflow run cancelled for another run
@@ -165,11 +177,12 @@ review some PRs need (optional). `theme` is what `t` last picked. State lives in
 ### In zellij, tmux or neither
 
 pr-watch works in any terminal: the lists, the events and their delivery (that goes through Claude Code, wherever
-the sessions run), search, themes, keys and plugins. Three features need it to run in zellij or tmux, and say so
+the sessions run), search, themes, keys and plugins. Four features need it to run in zellij or tmux, and say so
 outside them:
 
 - `g`, going to the owner's pane;
 - the `o` picker's two ways to start a session in a new tab;
+- `c`, starting a session on an issue;
 - tabs by stage (`arrange_tabs`), below.
 
 pr-watch tells which it runs in from its environment; with both set (one started inside the other), it takes the
@@ -191,7 +204,7 @@ its stage (a tmux window in tmux), creating the tabs as needed:
 
 A session moves when its stage changes, never while you're in its pane, and a pane you move by hand stays until
 its stage changes again. A session with no PR yet, or only drafts, stays in the tab you started it in;
-only one coming back from In review, its PR in draft again, moves to WIP. A session started from the `o` picker opens in the tab of its stage. Sessions working
+only one coming back from In review, its PR in draft again, moves to WIP. A session started from the `o` picker opens in the tab of its stage, and one started with `c` in WIP. Sessions working
 outside the repo are left alone. `pr-watch tabs` prints what would move where without moving anything.
 
 **The last message.** A session whose stage turns Done gets one last message, through the events like any other (in

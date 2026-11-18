@@ -32,6 +32,7 @@ var actions = []keymap.Action{
 	{Name: "owner", Keys: []string{"o"}, Does: "pick the Claude session that owns the PR"},
 	{Name: "send", Keys: []string{"s"}, Does: "send the PR's waiting events to its owner"},
 	{Name: "go_to_owner", Keys: []string{"g"}, Does: "go to the owner's pane"},
+	{Name: "new_session", Keys: []string{"c"}, Does: "start a Claude session on an issue, in the WIP tab when tabs are arranged"},
 	{Name: "search", Keys: []string{"/"}, Does: "find a PR by number, issue, title or author"},
 	{Name: "next_match", Keys: []string{"n"}, Does: "the next match"},
 	{Name: "prev_match", Keys: []string{"N"}, Does: "the previous match"},

@@ -34,11 +34,14 @@ func (m *model) View() tea.View {
 	switch {
 	case m.search != nil:
 		help = m.searchLine()
-	case m.picker == nil && m.approving == nil && !m.showKeys && m.themePick == nil && m.keys.First("help") != "": // the clue to every other key
+	case m.picker == nil && m.approving == nil && m.starting == nil && !m.showKeys && m.themePick == nil && m.keys.First("help") != "": // the clue to every other key
 		help += "  " + blue.Render(m.keys.First("help")) + faint.Render(" all keys")
 	}
 	if m.picker != nil {
 		lines = m.overlayPicker(lines, w)
+	}
+	if m.starting != nil {
+		lines = m.overlayNewSession(lines, w)
 	}
 	if m.approving != nil {
 		lines = m.overlayApprove(lines, w)
@@ -717,6 +720,8 @@ func (m *model) help() string {
 		return " ↑↓ move  ⏎ choose  esc cancel"
 	case m.approving != nil:
 		return " y approve  n or esc cancel"
+	case m.starting != nil:
+		return " type the issue  tab what to tell it  ⏎ start  esc cancel"
 	case m.showKeys:
 		return " " + m.keys.Say("help", "%s or esc close", "esc close")
 	case m.themePick != nil:

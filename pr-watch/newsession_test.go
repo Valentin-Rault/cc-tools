@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/Valentin-Rault/cc-tools/internal/mux"
@@ -34,13 +36,14 @@ type tabRecorder struct {
 	mux.Mux
 	title, dir string
 	argv       []string
+	err        error // what opening it returns
 }
 
 func (r *tabRecorder) Name() string { return "zellij" }
 
 func (r *tabRecorder) OpenTab(title, dir string, argv []string) error {
 	r.title, r.dir, r.argv = title, dir, argv
-	return nil
+	return r.err
 }
 
 // enter presses ⏎ the way the terminal does, and returns what it starts.
@@ -207,5 +210,50 @@ func TestNewSessionToReviewAPR(t *testing.T) {
 	msg := enter(m)().(startedMsg)
 	if msg.name != "pr-2754-5b" || rec.title != "Reviewing" || rec.argv[len(rec.argv)-1] != "PR #2754: review it" {
 		t.Errorf("started %+v in %q: %q", msg, rec.title, rec.argv)
+	}
+}
+
+// A review session started with c owns the PR when it isn't yours. Its events wait until the session is listed,
+// then go to it; a session that can't start gives the PR back. On one of your PRs it claims nothing.
+func TestNewReviewSessionClaimsThePR(t *testing.T) {
+	t.Setenv("PR_WATCH_CLAUDE", "/bin/sh")
+	m := testModel(t)
+	rec := &tabRecorder{}
+	m.mx, m.cfg.RepoDir, m.cfg.ArrangeTabs = rec, "/code/widgets", true
+	m.events = append(m.events, Event{At: time.Now(), PR: 2711, Text: "reply by bob https://gh/pr/2711#r2"})
+	rolls(t, "5be", "c40", "e52")
+	typeIn(m, "c", "pr-2711")
+	m.width, m.height = 140, 24
+	if v := screen(m); !strings.Contains(v, "#2711 from then on: the replies and pushes after your review go to it") {
+		t.Errorf("the form doesn't say it owns #2711:\n%s", v)
+	}
+	msg := enter(m)().(startedMsg)
+	if o := m.store.Owners()[2711]; o != (Owner{"pr-2711-5b", msg.id}) || msg.pr != 2711 {
+		t.Fatalf("owner %+v, started %+v", o, msg)
+	}
+	m.Update(msg)
+	m.dispatch()
+	if e := m.events[3]; e.Status == Sending {
+		t.Fatal("sent before the session was listed")
+	}
+	m.Update(sessionsMsg{sessions: append(slices.Clone(m.sessions), Session{Name: "pr-2711-5b", SessionID: msg.id})})
+	if e := m.events[3]; e.Status != Sending || e.Owner != "pr-2711-5b" {
+		t.Errorf("once it's listed: %+v", e)
+	}
+
+	rec.err = errors.New("no zellij") // a second one can't start: #2711 stays with the first
+	typeIn(m, "c", "pr-2711")
+	m.Update(enter(m)())
+	if o := m.store.Owners()[2711]; o != (Owner{"pr-2711-5b", msg.id}) || len(m.claims) != 0 {
+		t.Errorf("after a failed start: owner %+v, claims %v", o, m.claims)
+	}
+
+	rec.err = nil
+	typeIn(m, "c", "pr-2740") // yours
+	if v := screen(m); !strings.Contains(v, "nothing: it's your PR, its owner keeps it") {
+		t.Errorf("the form doesn't say it claims nothing:\n%s", v)
+	}
+	if msg := enter(m)().(startedMsg); msg.pr != 0 || m.store.Owners()[2740] != (Owner{}) {
+		t.Errorf("claimed your own PR: %+v, %+v", msg, m.store.Owners()[2740])
 	}
 }

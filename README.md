@@ -72,7 +72,9 @@ Claude's own names (the repo and 2 hex digits: 256 of them) often are. So the se
 a random suffix no live session has, `fdn-3174-7c`, or with no issue after the repo with 3 hex digits, a shape
 Claude's names never have: `widgets-a41`. When the issue already has a live session, the form says so and `ctrl+g`
 goes to it instead. A PR's key, `pr-2754`, starts a session to review it: in the Reviewing tab, named `pr-2754-7c`,
-and what you type reaches it after `PR #2754: `.
+and what you type reaches it after `PR #2754: `. When the PR isn't yours, the session owns it from then on, so the
+replies and pushes after your review go to it; its events wait until the session is up, and go back to whoever had
+it if the session can't start.
 
 Keep it open in a terminal tab, a zellij tab or a tmux window while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
 the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the

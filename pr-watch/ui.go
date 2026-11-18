@@ -102,8 +102,9 @@ type model struct {
 	inList    bool // focus is on that list, not on the events
 	cursor    [4]int
 	picker    *picker
-	approving *ReviewedPR // A is asking: approve this PR, as it was when you asked?
-	starting  *newSession // c's form is open
+	approving *ReviewedPR      // A is asking: approve this PR, as it was when you asked?
+	starting  *newSession      // c's form is open
+	claims    map[int]claiming // PRs claimed for review sessions c is starting
 
 	showKeys   bool    // ? floats every key over the screen
 	search     *search // / is open
@@ -284,6 +285,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.sessions = msg.sessions
 			m.pinOwners()
+			m.settleClaims()
 		}
 		return m, tea.Batch(m.dispatch(), m.arrangeTabs())
 
@@ -787,7 +789,7 @@ func (m *model) send(pr int, include func(Event) bool) tea.Cmd {
 		m.flash = fmt.Sprintf("#%d has no owner", pr) + m.keys.Say("owner", ": press %s to pick one", "")
 		return nil
 	}
-	if m.inflight[pr] {
+	if _, starting := m.claims[pr]; m.inflight[pr] || starting { // a review session c started isn't listed yet
 		return nil
 	}
 	if s, ok := resolve(m.sessions, owner); ok && twins(m.sessions, s.Name) > 1 {

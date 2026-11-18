@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +25,41 @@ type newSession struct {
 
 type startedMsg struct {
 	name, id, issue, tab string
+	pr                   int // the PR it was claimed for, or 0
 	err                  error
+}
+
+// claiming is a PR claimed for a review session c is starting. Its events are held until the session is listed, so
+// none goes to a session that isn't running yet; prev is who had it, given back if the session can't start.
+type claiming struct {
+	id      string
+	since   time.Time
+	prev    Owner
+	hadPrev bool
+}
+
+// claimWait is how long a PR's events wait for the session c started for it to be listed.
+const claimWait = time.Minute
+
+// reviewTarget is the PR a pr- key names when it isn't one of yours: the review session c starts owns it from then
+// on, so the replies and pushes after your review go to it. One of yours keeps the session working on it; before
+// the first refresh pr-watch can't tell, and claims nothing.
+func (m *model) reviewTarget(issue string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimPrefix(issue, "PR-"))
+	if !reviewKey(issue) || err != nil || m.prs == nil {
+		return 0, false
+	}
+	_, mine := m.prs[strconv.Itoa(n)]
+	return n, !mine
+}
+
+// settleClaims lets a claimed PR's events go once its session is listed, or once it's had time to start.
+func (m *model) settleClaims() {
+	for pr, c := range m.claims {
+		if _, live := resolve(m.sessions, Owner{SessionID: c.id}); live || time.Since(c.since) > claimWait {
+			delete(m.claims, pr)
+		}
+	}
 }
 
 func (m *model) openNewSession() {
@@ -147,6 +182,20 @@ func (m *model) startSession() tea.Cmd {
 	m.keepNameFree()
 	name, id, tab := m.newSessionName(), newUUID(), m.newSessionTab(issue)
 	m.starting = nil
+	pr, claim := m.reviewTarget(issue)
+	if claim {
+		prev, hadPrev := m.owners[pr]
+		if err := m.store.Claim(Owner{Name: name, SessionID: id}, []int{pr}); err != nil {
+			m.flash = "claim: " + err.Error()
+			return nil
+		}
+		if m.claims == nil {
+			m.claims = map[int]claiming{}
+		}
+		m.owners, m.claims[pr] = m.store.Owners(), claiming{id, time.Now(), prev, hadPrev}
+	} else {
+		pr = 0
+	}
 	args := []string{"--session-id", id, "-n", name}
 	if p := strings.TrimSpace(s.prompt); p != "" {
 		if issue != "" {
@@ -161,18 +210,31 @@ func (m *model) startSession() tea.Cmd {
 		if err == nil {
 			err = mx.OpenTab(tab, dir, argv)
 		}
-		return startedMsg{name: name, id: id, issue: issue, tab: tab, err: err}
+		return startedMsg{name: name, id: id, issue: issue, tab: tab, pr: pr, err: err}
 	}
 }
 
-// started logs the new session and lists the sessions again, so its name counts as taken.
+// started logs the new session and lists the sessions again, so its name counts as taken. A session that couldn't
+// start gives its PR back to whoever had it.
 func (m *model) started(msg startedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.flash = fmt.Sprintf("%s: couldn't open it: %v", msg.name, msg.err)
-		return nil
+		if c, ok := m.claims[msg.pr]; ok {
+			if c.hadPrev {
+				m.store.Claim(c.prev, []int{msg.pr})
+			} else {
+				m.store.Unclaim([]int{msg.pr})
+			}
+			delete(m.claims, msg.pr)
+			m.owners = m.store.Owners()
+		}
+		return m.dispatch()
 	}
 	m.store.appendLine("events.log", fmt.Sprintf("%s started %s for %s in the %s tab, session %s",
 		time.Now().UTC().Format(time.RFC3339), msg.name, cmp.Or(msg.issue, "no issue"), msg.tab, msg.id))
+	if msg.pr != 0 {
+		m.log(msg.pr, "claimed for "+msg.name+", the review session started with c")
+	}
 	return sessionsCmd()
 }
 
@@ -205,6 +267,11 @@ func (m *model) overlayNewSession(lines []string, w int) []string {
 			inner = append(inner, field("", yellow.Render(live.Name+" is on "+issue+" already")+"  "+
 				blue.Render("ctrl+g")+faint.Render(" goes to it")))
 		}
+	}
+	if pr, claim := m.reviewTarget(issue); claim {
+		inner = append(inner, field("owns", text2.Render(fmt.Sprintf("#%d from then on: the replies and pushes after your review go to it", pr))))
+	} else if reviewKey(issue) && m.prs != nil {
+		inner = append(inner, field("owns", faint.Render("nothing: it's your PR, its owner keeps it")))
 	}
 	inner = append(inner,
 		field("opens", text2.Render("a new pane in the "+m.newSessionTab(issue)+" tab, in "+tilde(m.cfg.RepoDir))),

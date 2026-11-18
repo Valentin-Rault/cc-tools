@@ -18,7 +18,7 @@ import (
 const epoch = "Thu, 01 Jan 1970 00:00:00 GMT"
 
 // backgroundRefresh: GitHub doesn't notify you about your own actions (your review, your merge), so pr-watch also
-// refreshes this often whatever happens. One refresh costs about 20 of GraphQL's 5000 points an hour.
+// refreshes this often whatever happens. One refresh costs about 26 of GraphQL's 5000 points an hour.
 const backgroundRefresh = 5 * time.Minute
 
 // ReviewRequest is someone else's PR waiting for your review.
@@ -167,7 +167,7 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed, merged []int, 
 		w.store.write("retry", "")
 		return nil, nil, nil, fmt.Errorf("refresh: %w", err)
 	}
-	prs := normalize(d.Mine.Nodes, w.me, w.cfg.Ignore)
+	prs := normalize(d.Mine.Nodes, w.me, w.cfg.SecurityTeam, w.cfg.Ignore)
 	if w.snap != nil { // the very first refresh only sets the baseline
 		events = diff(w.snap, prs, now)
 	}

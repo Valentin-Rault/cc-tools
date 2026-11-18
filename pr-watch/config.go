@@ -18,7 +18,7 @@ type Config struct {
 	Repo    string   `json:"repo"`     // owner/name of the repo whose PRs you author
 	RepoDir string   `json:"repo_dir"` // a local clone: a push from any worktree moves its origin/<branch> refs
 	Ignore  []string `json:"ignore"`   // logins whose reviews and comments never need action (bots)
-	// SecurityTeam is the slug of a team whose review some PRs need; they get a shield in To review.
+	// SecurityTeam is the slug of a team whose review some PRs need; they get a shield, yours and the ones to review.
 	SecurityTeam string `json:"security_team"`
 	// ArrangeTabs moves each Claude session working in the repo to the tab of its stage (WIP, In review, Reviewing,
 	// Done): a tmux window, or a zellij tab through the plugin at TabsPlugin.

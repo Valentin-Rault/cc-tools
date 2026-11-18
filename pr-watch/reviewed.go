@@ -211,18 +211,34 @@ func askedWhom(n reviewNode, me, security string, mine map[string]int) (direct b
 // stands. An approval made on the team's behalf counts for the team, not as someone else's approval.
 func otherReviews(n reviewNode, me, team string) (approvedBy []string, security string) {
 	for _, rv := range n.LatestOpinionatedReviews.Nodes {
-		if team != "" && slices.ContainsFunc(rv.OnBehalfOf.Nodes, func(t struct{ Slug string }) bool { return strings.EqualFold(t.Slug, team) }) {
-			security = map[string]string{"APPROVED": "approved", "CHANGES_REQUESTED": "changes"}[rv.State]
+		if forTeam(rv.OnBehalfOf.Nodes, team) {
 			continue
 		}
 		if who := login(rv.Author); rv.State == "APPROVED" && !strings.EqualFold(who, me) {
 			approvedBy = append(approvedBy, who)
 		}
 	}
-	for _, rr := range n.ReviewRequests.Nodes { // asked (again): the team's review is pending, whatever it said before
+	return approvedBy, securityReview(n.ReviewRequests, n.LatestOpinionatedReviews, team)
+}
+
+// securityReview is where the security team's review of a PR stands: "requested" while the team is asked, even
+// again after it reviewed; else "approved" or "changes" from a review made on its behalf; else "", the team's
+// review isn't needed (or no team is set).
+func securityReview(requests requestNodes, latest opinionNodes, team string) string {
+	for _, rr := range requests.Nodes {
 		if team != "" && rr.RequestedReviewer != nil && strings.EqualFold(rr.RequestedReviewer.Slug, team) {
-			security = "requested"
+			return "requested"
 		}
 	}
-	return approvedBy, security
+	for _, rv := range latest.Nodes {
+		if forTeam(rv.OnBehalfOf.Nodes, team) {
+			return map[string]string{"APPROVED": "approved", "CHANGES_REQUESTED": "changes"}[rv.State]
+		}
+	}
+	return ""
+}
+
+// forTeam: a review was made on behalf of the team.
+func forTeam(teams []struct{ Slug string }, team string) bool {
+	return team != "" && slices.ContainsFunc(teams, func(t struct{ Slug string }) bool { return strings.EqualFold(t.Slug, team) })
 }

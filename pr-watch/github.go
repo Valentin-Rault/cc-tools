@@ -36,6 +36,8 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
     commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
     reviews(last: 20) { nodes { id state url bodyText author { login } } }
     comments(last: 20) { nodes { id url author { login } } }
+    reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } } } }
+    latestOpinionatedReviews(first: 10) { nodes { state onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
   review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     number title url isDraft createdAt additions deletions author { login } mergeQueueEntry { position }
@@ -76,8 +78,27 @@ type prNode struct {
 			Commit struct{ StatusCheckRollup *checkRollup }
 		}
 	}
-	Reviews  struct{ Nodes []itemNode }
-	Comments struct{ Nodes []itemNode }
+	Reviews                  struct{ Nodes []itemNode }
+	Comments                 struct{ Nodes []itemNode }
+	ReviewRequests           requestNodes // for the security team's shield
+	LatestOpinionatedReviews opinionNodes
+}
+
+// requestNodes are who a PR asks to review it: a team, by its slug, or a person, by login.
+type requestNodes struct {
+	Nodes []struct {
+		AsCodeOwner       bool
+		RequestedReviewer *struct{ Slug, Login string } // a team's slug, or a person's login
+	}
+}
+
+// opinionNodes are each reviewer's latest approval or request for changes, and the teams it was made for.
+type opinionNodes struct {
+	Nodes []struct {
+		State      string
+		Author     *struct{ Login string }
+		OnBehalfOf struct{ Nodes []struct{ Slug string } }
+	}
 }
 
 // checkRollup is a commit's checks, and their state as GitHub rolls them up.
@@ -122,19 +143,8 @@ type reviewNode struct {
 			Commit struct{ StatusCheckRollup *checkRollup }
 		}
 	}
-	ReviewRequests struct {
-		Nodes []struct {
-			AsCodeOwner       bool
-			RequestedReviewer *struct{ Slug, Login string } // a team's slug, or a person's login
-		}
-	}
-	LatestOpinionatedReviews struct { // each reviewer's latest approval or request for changes
-		Nodes []struct {
-			State      string
-			Author     *struct{ Login string }
-			OnBehalfOf struct{ Nodes []struct{ Slug string } }
-		}
-	}
+	ReviewRequests           requestNodes
+	LatestOpinionatedReviews opinionNodes
 }
 
 type reviewedNode struct {

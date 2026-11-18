@@ -64,7 +64,7 @@ func TestCancelledTwinRunsAreNoFailure(t *testing.T) {
 			job("assign-reviewers", "COMPLETED", "SKIPPED", 3, 301)}, "EXPECTED", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := normalize([]prNode{checks(t, tc.state, join(tc.contexts...))}, "me", nil)[0]
+			p := normalize([]prNode{checks(t, tc.state, join(tc.contexts...))}, "me", "", nil)[0]
 			if p.CI != tc.ci || !slices.Equal(p.Failing, tc.failing) {
 				t.Errorf("CI = %s, failing %q; want %s, failing %q", p.CI, p.Failing, tc.ci, tc.failing)
 			}
@@ -88,12 +88,12 @@ func TestToReviewLeavesOutCancelledTwinRuns(t *testing.T) {
 // A stacked push sends no ci-failed for the cancelled twin, and a real failure after it still gets sent.
 func TestStackedPushSendsOnlyTheRealFailure(t *testing.T) {
 	old := map[string]Stored{"12": {Head: "9f8e7d6", CI: "SUCCESS"}}
-	running := normalize([]prNode{checks(t, "FAILURE", join(append(slices.Clone(stackedPush), job("ci", "IN_PROGRESS", "", 1, 101))...))}, "me", nil)
+	running := normalize([]prNode{checks(t, "FAILURE", join(append(slices.Clone(stackedPush), job("ci", "IN_PROGRESS", "", 1, 101))...))}, "me", "", nil)
 	if e := diff(old, running, time.Now()); len(e) != 0 {
 		t.Fatalf("events while the other run runs = %q", eventLines(e))
 	}
 	snap := snapshot(old, running)
-	failed := normalize([]prNode{checks(t, "FAILURE", join(append(slices.Clone(stackedPush), job("ci", "COMPLETED", "FAILURE", 1, 101))...))}, "me", nil)
+	failed := normalize([]prNode{checks(t, "FAILURE", join(append(slices.Clone(stackedPush), job("ci", "COMPLETED", "FAILURE", 1, 101))...))}, "me", "", nil)
 	if e := eventLines(diff(snap, failed, time.Now())); !slices.Equal(e, []string{"#12 ci-failed on abc1234: ci u/12/checks"}) {
 		t.Errorf("events once it failed = %q", e)
 	}

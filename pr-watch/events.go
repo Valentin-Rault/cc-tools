@@ -21,6 +21,7 @@ type PR struct {
 	CI                       string   // rollup state: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED, or NONE without checks
 	Failing                  []string // names of the failed checks
 	Items                    []Item   // reviews and comments by other people
+	Security                 string   // the security team's review: "", "requested", "approved" or "changes"
 }
 
 // Item is a review or comment by someone else. Kind is empty when it needs no action (an approval, a dismissal).
@@ -44,6 +45,7 @@ type Stored struct {
 	// Mergeable is GitHub's last answer (UNKNOWN: ask again soon); Conflicts is the last answer that wasn't UNKNOWN
 	Mergeable string `json:"mergeable,omitempty"`
 	Conflicts bool   `json:"conflicts,omitempty"`
+	Security  string `json:"security,omitempty"` // the security team's review, for its shield
 }
 
 type Status string
@@ -75,14 +77,15 @@ var failedConclusions = []string{"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "
 
 var reviewKinds = map[string]string{"CHANGES_REQUESTED": "changes-requested", "COMMENTED": "review", "APPROVED": "approved"}
 
-func normalize(nodes []prNode, me string, ignore []string) []PR {
+func normalize(nodes []prNode, me, securityTeam string, ignore []string) []PR {
 	var prs []PR
 	for _, n := range nodes {
 		if n.Number == 0 { // a search hit that isn't a pull request
 			continue
 		}
 		p := PR{NodeID: n.ID, Number: n.Number, Title: n.Title, URL: n.URL, Branch: n.HeadRefName, Head: n.HeadRefOid,
-			Base: n.BaseRefName, Mergeable: n.Mergeable, Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE"}
+			Base: n.BaseRefName, Mergeable: n.Mergeable, Draft: n.IsDraft, Queued: n.MergeQueueEntry != nil, Review: n.ReviewDecision, CI: "NONE",
+			Security: securityReview(n.ReviewRequests, n.LatestOpinionatedReviews, securityTeam)}
 		if len(n.Commits.Nodes) > 0 {
 			p.CI, p.Failing = ciState(n.Commits.Nodes[0].Commit.StatusCheckRollup)
 		}
@@ -214,7 +217,8 @@ func snapshot(old map[string]Stored, prs []PR) map[string]Stored {
 		}
 		snap[strconv.Itoa(p.Number)] = Stored{NodeID: p.NodeID, Branch: p.Branch, Head: p.Head, CI: p.CI, Queued: p.Queued, Seen: seen,
 			Title: p.Title, URL: p.URL, Draft: p.Draft, Review: p.Review, Failing: p.Failing, Reviews: latestReviews(p.Items),
-			Base: p.Base, Mergeable: p.Mergeable, Conflicts: p.Mergeable == "CONFLICTING" || p.Mergeable != "MERGEABLE" && q.Conflicts}
+			Base: p.Base, Mergeable: p.Mergeable, Conflicts: p.Mergeable == "CONFLICTING" || p.Mergeable != "MERGEABLE" && q.Conflicts,
+			Security: p.Security}
 	}
 	return snap
 }

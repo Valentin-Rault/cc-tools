@@ -203,11 +203,14 @@ func window(rows []string, sel, n, w int, focused bool, marked map[int]bool) []s
 	return out
 }
 
+// prRow is one of your PRs: with security_team set, its shield where To review has it, so a PR that needs the
+// team's review shows at a glance; then the stage, the checks and the owner.
 func (m *model) prRow(n, w int) string {
 	s := m.prs[strconv.Itoa(n)]
 	const railW, ciW, ownerW = 16, 28, 30
-	titleW := max(14, w-7-2-railW-2-ciW-2-ownerW)
-	return m.prNumber(n, s.Title, "", text) + cell(text.Render(s.Title), titleW) + "  " +
+	shieldW := map[bool]int{true: 2}[m.cfg.SecurityTeam != ""]
+	titleW := max(14, w-7-2-shieldW-railW-2-ciW-2-ownerW)
+	return m.prNumber(n, s.Title, "", text) + cell(shield(s.Security), shieldW) + cell(text.Render(s.Title), titleW) + "  " +
 		cell(rail(s), railW) + "  " + cell(m.ciCell(s), ciW) + "  " + m.ownerCell(n)
 }
 
@@ -302,6 +305,12 @@ func shield(review string) string {
 		return orange.Render("\U000F0ECB")
 	}
 	return ""
+}
+
+// securityLine is the security team's review in words, behind its shield.
+func (m *model) securityLine(review string) string {
+	return shield(review) + text2.Render(" "+m.cfg.SecurityTeam+" "+
+		map[string]string{"requested": "to review", "approved": "approved", "changes": "requested changes"}[review])
 }
 
 // reviewRow keeps what matters at a glance: the security shield, the PR's status, who else approved it. How long
@@ -826,8 +835,7 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 			reviews = append(reviews, green.Render("✓")+text2.Render(" "+who+" approved"))
 		}
 		if r.Security != "" {
-			reviews = append(reviews, shield(r.Security)+text2.Render(" "+m.cfg.SecurityTeam+" "+
-				map[string]string{"requested": "to review", "approved": "approved", "changes": "requested changes"}[r.Security]))
+			reviews = append(reviews, m.securityLine(r.Security))
 		}
 		if len(reviews) == 0 {
 			reviews = []string{faint.Render("none yet")}
@@ -911,6 +919,9 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 					reviews = append(reviews, "  "+faint.Render(l))
 				}
 			}
+		}
+		if s.Security != "" {
+			reviews = append(reviews, m.securityLine(s.Security))
 		}
 		if len(reviews) > 0 {
 			field("reviews", reviews...)

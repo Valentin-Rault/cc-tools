@@ -42,7 +42,8 @@ and `esc` puts the one you had back; cc-status's popup follows. Each PR shows it
 `⚠ conflicts` when it has merge conflicts, and its owner. *To review* shows each PR's status in one icon (`⧗` already in the merge queue, else
 how its checks are doing); a PR someone else already approved shows `✓ name` and moves to the bottom, and with
 `security_team` set, a shield shows the security team's review (pending, green once approved, orange with changes
-requested; Nerd Font icons, which Ghostty ships). Requests that name you come first; the ones GitHub sent a team
+requested; Nerd Font icons, which Ghostty ships). Your own PRs get the same shield after their number, so the ones
+that still need the team's review stand out. Requests that name you come first; the ones GitHub sent a team
 you're in come after, under their own heading, and the tab and status line count them apart (`To review 2 +3 via
 teams`). Each row says who was asked: you, or the team. `e` opens a pane beside the lists with more about the selected
 PR: how you were asked (directly, or through a team, as code owners or not), its status, reviews, size, how long it
@@ -149,7 +150,7 @@ every minute for 10 minutes after you open a PR from it (`⏎`), when you're lik
 Merge conflicts, usually from someone else's merge, come with no notification either: a refresh finds them, and
 while GitHub is still working out whether a PR conflicts, pr-watch asks again every poll. A PR that drops out of
 the search counts as merged or closed only once GitHub says so: search can leave PRs out without an error.
-A refresh costs about 13 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list, and with
+A refresh costs about 26 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list, and with
 `"notify": true` in the config also as one macOS notification each.
 
 **Config** in `~/.config/pr-watch/config.json` (`PR_WATCH_REPO`, `PR_WATCH_REPO_DIR` and `PR_WATCH_IGNORE`

@@ -134,6 +134,7 @@ type choice struct {
 	link    prLink
 	label   string
 	note    string
+	warn    string // what's wrong with picking it
 }
 
 type picker struct {
@@ -312,18 +313,23 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sentMsg:
 		delete(m.inflight, msg.pr)
+		var twin sharedNameError
 		m.settle(msg.pr, func(e *Event) {
 			switch {
 			case msg.err == nil:
 				e.Status, e.Note = Sent, ""
 			case errors.Is(msg.err, errOwnerGone):
 				e.Status, e.Note = OwnerGone, ""
+			case errors.As(msg.err, &twin):
+				e.Status, e.Note = SharedName, twin.note
 			default:
 				e.Status, e.Note = Failed, msg.err.Error()
 			}
 		})
 		result := "sent → " + msg.owner
-		if msg.err != nil {
+		if errors.As(msg.err, &twin) {
+			result = "held: " + twin.note
+		} else if msg.err != nil {
 			result = "failed → " + msg.owner + ": " + msg.err.Error()
 		} else if m.store.Closed()[msg.pr] { // the last message went: the PR needs no owner anymore
 			m.store.Unclaim([]int{msg.pr})
@@ -629,7 +635,11 @@ func (m *model) openPicker(pr int) {
 		} else if x.Branch != "" && x.Branch == info.Branch {
 			note += "  ← has this branch checked out"
 		}
-		p.choices = append(p.choices, choice{kind: chooseSession, session: x, label: x.Name, note: note})
+		c := choice{kind: chooseSession, session: x, label: x.Name, note: note}
+		if twins(m.sessions, x.Name) > 1 {
+			c.warn = "shares its name: events wait until one is /renamed"
+		}
+		p.choices = append(p.choices, c)
 	}
 	if m.mx == nil {
 		for i := range p.choices {
@@ -763,7 +773,7 @@ func (m *model) dispatch() tea.Cmd {
 		}
 		// a new owner (claimed here or from a session) picks up what was waiting; a gone owner isn't retried in a loop
 		cmds = append(cmds, m.send(pr, func(e Event) bool {
-			return e.Status == Waiting || ((e.Status == NeedsOwner || e.Status == OwnerGone) && e.Owner != owner.Name)
+			return e.Status == Waiting || e.Status == SharedName || ((e.Status == NeedsOwner || e.Status == OwnerGone) && e.Owner != owner.Name)
 		}))
 	}
 	m.savePending()
@@ -778,6 +788,10 @@ func (m *model) send(pr int, include func(Event) bool) tea.Cmd {
 		return nil
 	}
 	if m.inflight[pr] {
+		return nil
+	}
+	if s, ok := resolve(m.sessions, owner); ok && twins(m.sessions, s.Name) > 1 {
+		m.holdForTwin(pr, s, include)
 		return nil
 	}
 	var batch []Event
@@ -802,7 +816,26 @@ func (m *model) send(pr int, include func(Event) bool) tea.Cmd {
 		if !ok {
 			return sentMsg{pr, owner.Name, errOwnerGone}
 		}
+		if twins(sessions, s.Name) > 1 { // a twin started since the TUI last listed the sessions
+			return sentMsg{pr, s.Name, sharedNameError{twinNote(s, sessions)}}
+		}
 		return sentMsg{pr, s.Name, sender.Send(s.Name, text)}
+	}
+}
+
+// holdForTwin holds the PR's events that would have gone while another live session has the owner's name, saying
+// which one to rename; dispatch sends them once the name is unique again.
+func (m *model) holdForTwin(pr int, s Session, include func(Event) bool) {
+	note, changed := twinNote(s, m.sessions), false
+	for i := range m.events {
+		if e := &m.events[i]; e.PR == pr && include(*e) {
+			changed = changed || e.Status != SharedName || e.Note != note
+			e.Status, e.Owner, e.Note = SharedName, s.Name, note
+		}
+	}
+	if changed {
+		m.flash = fmt.Sprintf("#%d waits: %s", pr, note)
+		m.savePending()
 	}
 }
 
@@ -851,7 +884,7 @@ func (m *model) dropEvents(match func(Event) bool) int {
 // so those PRs stay routed once their session renames itself.
 func (m *model) pinOwners() {
 	for pr, o := range m.owners {
-		if s, ok := findSession(m.sessions, o.Name); ok && o.SessionID == "" {
+		if s, ok := findSession(m.sessions, o.Name); ok && o.SessionID == "" && twins(m.sessions, o.Name) == 1 {
 			if err := m.store.Claim(Owner{Name: o.Name, SessionID: s.SessionID}, []int{pr}); err != nil {
 				m.flash = "recording the owner's session: " + err.Error()
 			}

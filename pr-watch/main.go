@@ -38,9 +38,11 @@ func main() {
 		}
 		owner := Owner{Name: args[1]}
 		if sessions, err := liveSessions(); err == nil {
-			if s, ok := findSession(sessions, owner.Name); ok {
-				owner.SessionID = s.SessionID
-			} else {
+			// run from a session (as Claude does), it claims for that one: another may have the same name
+			if owner, err = claimant(sessions, args[1], os.Getenv("CLAUDE_CODE_SESSION_ID")); err != nil {
+				fail(err)
+			}
+			if owner.SessionID == "" {
 				fmt.Fprintf(os.Stderr, "pr-watch: no running session is named %s; claimed by name only\n", owner.Name)
 			}
 		}
@@ -69,6 +71,10 @@ func main() {
 		text := strings.Join(args[2:], " ")
 		if text == "" {
 			text = message(0, []Event{{Text: "test-event from `pr-watch send`, ignore"}})
+		}
+		if sessions, err := liveSessions(); err == nil && twins(sessions, args[1]) > 1 {
+			fail(fmt.Errorf("%d running sessions are named %s, and a message to a shared name reaches neither: /rename one",
+				twins(sessions, args[1]), args[1]))
 		}
 		if err := newSender(store.Dir).Send(args[1], text); err != nil {
 			fail(err)

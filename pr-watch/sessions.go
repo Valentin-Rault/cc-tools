@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // Session is a running Claude Code session, as `claude agents --json` lists it. Its name is what SendMessage takes.
@@ -16,7 +17,61 @@ type Session struct {
 	Kind      string `json:"kind"`
 	Status    string `json:"status"`
 	Pid       int    `json:"pid"`
-	Branch    string `json:"-"` // checked out in Cwd, filled in by the TUI
+	StartedAt int64  `json:"startedAt"` // Unix milliseconds
+	Branch    string `json:"-"`         // checked out in Cwd, filled in by the TUI
+}
+
+// Twins. Claude gives sessions names that often repeat (the repo and 2 hex digits), and SendMessage refuses a name
+// two live sessions share: it delivers nothing and asks for a ref that only a session listing them can read. So
+// pr-watch never sends to a shared name. A PR's events wait, saying which session to /rename, and go once the name
+// is unique again.
+
+// twins is how many live sessions are called name.
+func twins(sessions []Session, name string) int {
+	n := 0
+	for _, s := range sessions {
+		if s.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+// twinNote says which session to rename so that messages reach it again.
+func twinNote(s Session, sessions []Session) string {
+	note := fmt.Sprintf("%d live sessions are named %s: /rename the one in %s", twins(sessions, s.Name), s.Name, tilde(s.Cwd))
+	if s.StartedAt > 0 {
+		note += ", started " + ago(time.Since(time.UnixMilli(s.StartedAt))) + " ago"
+	}
+	return note
+}
+
+// sharedNameError is a send held back because another live session has the owner's name.
+type sharedNameError struct{ note string }
+
+func (e sharedNameError) Error() string { return e.note }
+
+// claimant is who `pr-watch claim <name>` claims for: the session it runs in when that's the one named, by its ID,
+// since another session may have the same name; else the one live session called that. A name that two other
+// sessions share is refused rather than guessed.
+func claimant(sessions []Session, name, self string) (Owner, error) {
+	var found []Session
+	for _, s := range sessions {
+		if s.Name != name {
+			continue
+		}
+		if self != "" && s.SessionID == self {
+			return Owner{Name: name, SessionID: self}, nil
+		}
+		found = append(found, s)
+	}
+	switch len(found) {
+	case 0:
+		return Owner{Name: name}, nil
+	case 1:
+		return Owner{Name: name, SessionID: found[0].SessionID}, nil
+	}
+	return Owner{}, fmt.Errorf("%d running sessions are named %s: run pr-watch claim from the one you mean, or /rename one", len(found), name)
 }
 
 // senderName is the -n of the headless sender, which shows up in the list while it runs.

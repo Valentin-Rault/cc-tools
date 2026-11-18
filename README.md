@@ -93,8 +93,10 @@ pr-watch claim <session name> <pr>...
 ```
 
 A pick or a claim wins over the link and records the session's ID, so the PR stays routed when the session renames
-itself. When the PR is merged or closed its owner is dropped; `x` also purges owners and undelivered events of PRs
-that aren't open anymore.
+itself. Run from a session, as Claude runs it, a claim is for that session, by its ID (`$CLAUDE_CODE_SESSION_ID`),
+even when another session has its name; from anywhere else, a name two running sessions share is refused rather
+than guessed. When the PR is merged or closed its owner is dropped; `x` also purges owners and undelivered events of
+PRs that aren't open anymore.
 
 **PRs you reviewed.** On someone else's PR you reviewed, new replies in your threads, comments, pushed commits and
 a new request for your review are events too. They go to the session reviewing it, with instructions to draft the
@@ -129,6 +131,12 @@ claude -p --model haiku -n pr-watch --tools SendMessage --allowedTools SendMessa
 It can do nothing but send, takes a few seconds and costs about a tenth of a cent. pr-watch reads its transcript
 and marks the event *sent* only if `SendMessage` was called with exactly that recipient and text and succeeded.
 `pr-watch send <session> [text]` runs one send by hand.
+
+`SendMessage` refuses a name two live sessions share, and Claude's own names often repeat (the repo and 2 hex
+digits). So while another session has the owner's name, pr-watch sends nothing: the PR's events show *name shared*,
+its owner `⚠ name shared`, and `e` on the PR says which session to `/rename`. The events go once the name is unique
+again. The `o` picker marks such sessions, and `pr-watch send` refuses a shared name. Sessions started with `c` or
+from the picker get names no live session has.
 
 **Polling.** A conditional request to GitHub's notifications API every `X-Poll-Interval` (a free 304 while
 nothing changed). Your PRs are refreshed with one GraphQL query only when a notification concerns them, a PR is

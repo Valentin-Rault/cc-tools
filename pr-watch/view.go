@@ -279,6 +279,9 @@ func (m *model) ownerCell(pr int) string {
 	_, explicit := m.owners[pr]
 	linked := map[bool]string{true: "", false: faint.Render(" (linked)")}[explicit]
 	if s, ok := resolve(m.sessions, owner); ok {
+		if twins(m.sessions, s.Name) > 1 { // SendMessage can't tell them apart: its events wait
+			return yellow.Render("●") + text.Render(" "+s.Name) + yellow.Render(" ⚠ name shared") + linked
+		}
 		return green.Render("●") + text.Render(" "+s.Name) + linked
 	}
 	if m.sessions == nil { // not listed yet
@@ -537,11 +540,12 @@ func (m *model) eventRow(e Event, w int, fresh bool) string {
 		NeedsOwner: yellow.Render("needs owner ") + keyCap("owner"),
 		Waiting:    yellow.Render("waiting ") + keyCap("send"),
 		OwnerGone:  red.Render("owner gone ") + keyCap("owner"),
+		SharedName: yellow.Render("name shared"), // e on the PR says which session to rename
 		Sending:    yellow.Render("sending…"),
 		Failed:     red.Render("failed ") + keyCap("send"),
 		ForYou:     text2.Render("for you ") + keyCap("send"),
 	}[e.Status]
-	if e.Note != "" {
+	if e.Note != "" && e.Status != SharedName {
 		status += comment.Render("  " + e.Note)
 	}
 	leftW := max(30, w-2-24-2-18)
@@ -630,6 +634,9 @@ func (m *model) overlayPicker(lines []string, w int) []string {
 		row := cell(label, 42) + faint.Render(note)
 		if hint != "" {
 			row += green.Render("  ← " + hint)
+		}
+		if c.warn != "" {
+			row += yellow.Render("  ⚠ " + c.warn)
 		}
 		rows = append(rows, row)
 	}
@@ -866,6 +873,7 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 		}
 		field("since", since...)
 		field("session", m.ownerCell(r.Number))
+		field("", m.twinLines(r.Number, w-9)...)
 		m.eventsField(r.Number, field)
 		lines = append(lines, "", faint.Render(map[bool]string{true: "⏎ opens what changed since your review", false: "⏎ opens it on GitHub"}[r.NewCommits > 0]))
 	default:
@@ -908,10 +916,24 @@ func (m *model) detailLines(w int) (title string, lines []string) {
 			field("reviews", reviews...)
 		}
 		field("owner", m.ownerCell(prs[i]))
+		field("", m.twinLines(prs[i], w-9)...)
 		m.eventsField(prs[i], field)
 		lines = append(lines, "", faint.Render("⏎ opens it on GitHub"))
 	}
 	return title, lines
+}
+
+// twinLines say which session to rename when another live session has the PR's owner's name, wrapped to w.
+func (m *model) twinLines(pr, w int) []string {
+	s, ok := resolve(m.sessions, m.ownerOf(pr))
+	if !ok || twins(m.sessions, s.Name) < 2 {
+		return nil
+	}
+	var lines []string
+	for _, l := range wrapWords(twinNote(s, m.sessions), w) {
+		lines = append(lines, yellow.Render(l))
+	}
+	return lines
 }
 
 // eventsField lists the PR's latest events, newest first.

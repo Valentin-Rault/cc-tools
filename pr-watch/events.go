@@ -50,8 +50,9 @@ type Status string
 
 const (
 	NeedsOwner Status = "needs owner"
-	Waiting    Status = "waiting"    // manual mode: held until you send it
-	OwnerGone  Status = "owner gone" // the owner session isn't running
+	Waiting    Status = "waiting"     // manual mode: held until you send it
+	OwnerGone  Status = "owner gone"  // the owner session isn't running
+	SharedName Status = "name shared" // held: another live session has the owner's name, so it wouldn't arrive
 	Sending    Status = "sending"
 	Sent       Status = "sent"
 	Failed     Status = "failed"

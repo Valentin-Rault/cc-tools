@@ -73,15 +73,16 @@ type model struct {
 	sender  *Sender
 	linkIdx *linkIndex
 
-	prs      map[string]Stored
-	toReview []ReviewRequest
-	reviewed []ReviewedPR
-	events   []Event // oldest first
-	owners   map[int]Owner
-	links    map[int]prLink
-	mentions map[int][]mention
-	sessions []Session
-	inflight map[int]bool
+	prs       map[string]Stored
+	toReview  []ReviewRequest
+	teamsMore int // your teams' requests left out of To review, which has the newest 30
+	reviewed  []ReviewedPR
+	events    []Event // oldest first
+	owners    map[int]Owner
+	links     map[int]prLink
+	mentions  map[int][]mention
+	sessions  []Session
+	inflight  map[int]bool
 
 	auto, paused, polling, linking bool
 	arranging                      bool           // a round of tab moves is running
@@ -248,7 +249,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prs = msg.PRs
 		}
 		if msg.Refreshed {
-			m.toReview, m.reviewed = msg.ToReview, msg.Reviewed
+			m.toReview, m.teamsMore, m.reviewed = msg.ToReview, msg.TeamsMore, msg.Reviewed
 		}
 		m.dropEvents(func(e Event) bool { return slices.Contains(msg.Closed, e.PR) && e.Prompt == "" }) // not a last message
 		m.events = append(m.events, msg.Events...)

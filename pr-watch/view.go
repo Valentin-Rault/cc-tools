@@ -343,6 +343,7 @@ func askedCell(r ReviewRequest) string {
 }
 
 // reviewCounts splits To review: the requests that name you, and the ones that only came through a team of yours.
+// reviewCounts counts the requests that name you and the ones your teams got, those left out of the list too.
 func (m *model) reviewCounts() (yours, teams int) {
 	for _, r := range m.toReview {
 		if r.TeamOnly() {
@@ -351,7 +352,7 @@ func (m *model) reviewCounts() (yours, teams int) {
 			yours++
 		}
 	}
-	return yours, teams
+	return yours, teams + m.teamsMore
 }
 
 // reviewHeading heads each part of To review, like the events' days: what asked you, then what asked your teams.
@@ -372,6 +373,9 @@ func (m *model) reviewHeading(teamOnly bool, w int) string {
 		}
 	}
 	head := comment.Render(label) + faint.Render(fmt.Sprintf(" %d", n))
+	if teamOnly && m.teamsMore > 0 { // GitHub said how many there are; the list has the newest
+		head += faint.Render(fmt.Sprintf(" of %d, the newest", n+m.teamsMore))
+	}
 	if len(names) > 0 {
 		head += comment.Render("  " + strings.Join(names, ", "))
 	}

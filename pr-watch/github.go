@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,7 +31,15 @@ const checkFields = `statusCheckRollup { state contexts(first: 100) { nodes {
       ... on CheckRun { name status conclusion checkSuite { workflowRun { databaseId workflow { databaseId } } } }
       ... on StatusContext { context state } } } }`
 
-const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!, $me: String!) {
+// reviewFields are what To review shows of a PR waiting for your review.
+const reviewFields = `number title url isDraft createdAt additions deletions author { login } mergeQueueEntry { position }
+    commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
+    reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { ... on Team { slug } ... on User { login } } } }
+    latestOpinionatedReviews(first: 10) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }`
+
+// searchQuery: your PRs, the PRs asking for your review, in two searches so that the ones naming you all show
+// however many your teams are asked for (those are the newest 30, and how many there are), and the PRs you reviewed.
+const searchQuery = `query($mine: String!, $review: String!, $teamReview: String!, $reviewed: String!, $me: String!) {
   mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
     id number title url isDraft headRefName headRefOid baseRefName mergeable reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
@@ -39,12 +48,8 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } } } }
     latestOpinionatedReviews(first: 10) { nodes { state onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
-  review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest {
-    number title url isDraft createdAt additions deletions author { login } mergeQueueEntry { position }
-    commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
-    reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { ... on Team { slug } ... on User { login } } } }
-    latestOpinionatedReviews(first: 20) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }
-  } } }
+  review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest { ` + reviewFields + ` } } }
+  teamReview: search(query: $teamReview, type: ISSUE, first: 30) { issueCount nodes { ... on PullRequest { ` + reviewFields + ` } } }
   reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     id number title url isDraft headRefOid headRefName author { login }
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
@@ -56,9 +61,23 @@ const searchQuery = `query($mine: String!, $review: String!, $reviewed: String!,
 }`
 
 type searchData struct {
-	Mine     struct{ Nodes []prNode }       `json:"mine"`
-	Review   struct{ Nodes []reviewNode }   `json:"review"`
+	Mine       struct{ Nodes []prNode }     `json:"mine"`
+	Review     struct{ Nodes []reviewNode } `json:"review"` // the requests that name you
+	TeamReview struct {                     // the ones only your teams got: the newest 30, of IssueCount
+		IssueCount int
+		Nodes      []reviewNode
+	} `json:"teamReview"`
 	Reviewed struct{ Nodes []reviewedNode } `json:"reviewed"`
+}
+
+// reviewNodes are the PRs asking for your review: the ones naming you, then your teams'.
+func (d *searchData) reviewNodes() []reviewNode {
+	return append(slices.Clone(d.Review.Nodes), d.TeamReview.Nodes...)
+}
+
+// teamsLeftOut is how many PRs your teams are asked to review beyond the ones fetched.
+func (d *searchData) teamsLeftOut() int {
+	return max(0, d.TeamReview.IssueCount-len(d.TeamReview.Nodes))
 }
 
 type prNode struct {
@@ -227,10 +246,11 @@ func (c *ghClient) Login() (string, error) {
 func (c *ghClient) Search(repo, me string) (*searchData, error) {
 	var d searchData
 	err := c.gql.Do(searchQuery, map[string]any{
-		"mine":     "repo:" + repo + " is:pr is:open author:@me",
-		"review":   "repo:" + repo + " is:pr is:open review-requested:@me",
-		"reviewed": "repo:" + repo + " is:pr is:open reviewed-by:@me -author:@me sort:updated-desc",
-		"me":       me,
+		"mine":       "repo:" + repo + " is:pr is:open author:@me",
+		"review":     "repo:" + repo + " is:pr is:open user-review-requested:@me",
+		"teamReview": "repo:" + repo + " is:pr is:open review-requested:@me -user-review-requested:@me",
+		"reviewed":   "repo:" + repo + " is:pr is:open reviewed-by:@me -author:@me sort:updated-desc",
+		"me":         me,
 	}, &d)
 	return &d, err
 }

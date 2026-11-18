@@ -18,7 +18,7 @@ import (
 const epoch = "Thu, 01 Jan 1970 00:00:00 GMT"
 
 // backgroundRefresh: GitHub doesn't notify you about your own actions (your review, your merge), so pr-watch also
-// refreshes this often whatever happens. One refresh costs about 26 of GraphQL's 5000 points an hour.
+// refreshes this often whatever happens. One refresh costs about 27 of GraphQL's 5000 points an hour.
 const backgroundRefresh = 5 * time.Minute
 
 // ReviewRequest is someone else's PR waiting for your review.
@@ -52,6 +52,7 @@ type Watcher struct {
 	snap      map[string]Stored // replaced, never mutated, so a PollResult can share it
 	refreshed time.Time         // the last successful refresh
 	toReview  []ReviewRequest
+	teamsMore int // your teams' requests beyond the newest 30 that To review has
 	reviewed  []ReviewedPR
 	teams     map[string]int // your teams and their sizes; nil until GitHub said, asked again each refresh until then
 	notify    func(title, body string)
@@ -60,6 +61,7 @@ type Watcher struct {
 type PollResult struct {
 	PRs       map[string]Stored
 	ToReview  []ReviewRequest
+	TeamsMore int // PRs your teams are asked to review that To review leaves out: it has the newest 30
 	Reviewed  []ReviewedPR
 	Events    []Event
 	Interval  time.Duration // GitHub's X-Poll-Interval
@@ -126,7 +128,7 @@ func (w *Watcher) Poll(force bool) PollResult {
 		}
 		errs = append(errs, err)
 	}
-	r.PRs, r.ToReview, r.Reviewed, r.Err = w.snap, w.toReview, w.reviewed, errors.Join(errs...)
+	r.PRs, r.ToReview, r.TeamsMore, r.Reviewed, r.Err = w.snap, w.toReview, w.teamsMore, w.reviewed, errors.Join(errs...)
 	return r
 }
 
@@ -202,7 +204,7 @@ func (w *Watcher) refresh(now time.Time) (events []Event, closed, merged []int, 
 		owner, _, _ := strings.Cut(w.cfg.Repo, "/")
 		w.teams, _ = w.gh.Teams(owner, w.me) // without them, To review still tells requests that name you
 	}
-	w.toReview = reviewRequests(d.Review.Nodes, w.reviewed, w.me, w.cfg.SecurityTeam, w.teams)
+	w.toReview, w.teamsMore = reviewRequests(d.reviewNodes(), w.reviewed, w.me, w.cfg.SecurityTeam, w.teams), d.teamsLeftOut()
 	w.store.write("refs", w.pushedRefs())
 	w.store.remove("retry")
 	w.refreshed = now

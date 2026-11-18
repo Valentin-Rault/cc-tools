@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"slices"
@@ -732,5 +733,32 @@ func TestApprove(t *testing.T) {
 	press(m, "down") // #2758: you approved it as it is
 	if key("A"); m.approving != nil || m.flash != "you already approved #2758 as it is" {
 		t.Errorf("approving %v, flash %q", m.approving, m.flash)
+	}
+}
+
+// The requests that name you and your teams' come from two searches, so yours all show however many your teams get.
+// Of your teams' only the newest 30 are listed, and the tab, the heading and the status line count them all.
+func TestReviewRequestsYourTeamsLeftOut(t *testing.T) {
+	var d searchData
+	if err := json.Unmarshal([]byte(`{"review": {"nodes": [{"number": 3244}]},
+		"teamReview": {"issueCount": 86, "nodes": [{"number": 4118}, {"number": 4111}]}}`), &d); err != nil {
+		t.Fatal(err)
+	}
+	if n := d.reviewNodes(); len(n) != 3 || n[0].Number != 3244 || d.teamsLeftOut() != 84 {
+		t.Fatalf("nodes %+v, left out %d", n, d.teamsLeftOut())
+	}
+	m := testModel(t)
+	m.width, m.height = 160, 26
+	m.toReview = []ReviewRequest{
+		{Number: 3244, Title: "An old one that names you", Author: "carol", Direct: true, Created: time.Now()},
+		{Number: 4118, Title: "Rename the journal endpoints", Author: "frank", Teams: []string{"backend"}, Created: time.Now()},
+	}
+	m.teamsMore = 84
+	press(m, "right")
+	v := screen(m)
+	for _, want := range []string{"To review 1 +85 via teams", "asked your teams 1 of 85, the newest", "85 via teams"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("to review lacks %q:\n%s", want, v)
+		}
 	}
 }

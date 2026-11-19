@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1001,4 +1002,24 @@ func wrapWords(text string, w int) []string {
 		}
 	}
 	return append(lines, line)
+}
+
+// wrapTyped breaks what you're typing into lines of at most w cells, keeping it exactly as typed: each line ends after
+// the last space that fits, and a word longer than a line (a URL) fills it and goes on in the next.
+func wrapTyped(s string, w int) []string {
+	var lines []string
+	for ansi.StringWidth(s) > w {
+		cut := ansi.Truncate(s, w, "")
+		if i := strings.LastIndex(cut, " "); i > 0 {
+			cut = cut[:i+1]
+		}
+		if cut == "" { // a character wider than the line has one to itself
+			_, n := utf8.DecodeRuneInString(s)
+			cut = s[:n]
+		}
+		if lines, s = append(lines, cut), s[len(cut):]; s == "" {
+			return lines
+		}
+	}
+	return append(lines, s)
 }

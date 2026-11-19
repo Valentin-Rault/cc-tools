@@ -68,7 +68,10 @@ lists, and the matches' numbers stay highlighted until `esc`.
 the session, and `⏎` opens it in `repo_dir`, in a new pane of the WIP tab (with `arrange_tabs`; else of a tab named
 for the issue). It starts on whatever the clone has checked out, like a session you start by hand, and makes its own
 worktree and branch. With nothing to tell it, it waits for you; what you do type reaches it after the issue
-(`FDN-3174: …`). Sessions message each other by name, and SendMessage refuses a name two live sessions share, which
+(`FDN-3174: …`). The prompt wraps, the form growing with it, so you see all you type; past what the screen holds it
+shows the end, or from the cursor's row when that's above it, and how many rows are above and below. `←` and `→` move
+the cursor in either field, and what you type, paste or delete goes where it is; `↑` and `↓` move it a row in the
+prompt (`↑` on its first row goes to the issue), and `home` and `end` (`ctrl+a`, `ctrl+e`) to the ends. Sessions message each other by name, and SendMessage refuses a name two live sessions share, which
 Claude's own names (the repo and 2 hex digits: 256 of them) often are. So the session is named for the issue with
 a random suffix no live session has, `fdn-3174-7c`, or with no issue after the repo with 3 hex digits, a shape
 Claude's names never have: `widgets-a41`. When the issue already has a live session, the form says so and `ctrl+g`

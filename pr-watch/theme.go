@@ -20,6 +20,7 @@ var (
 	text, text2, faint, comment, gutter, blue, cyan, orange, yellow, green, red  lipgloss.Style
 	gitAdd, gitDel, bold, accent, keycap, segment, bar                           lipgloss.Style
 	searchHit                                                                    lipgloss.Style // what / found
+	caret                                                                        lipgloss.Style // the cursor in c's form
 	lift                                                                         *strings.Replacer
 )
 
@@ -48,6 +49,7 @@ func useTheme(name string) bool {
 	segment = lipgloss.NewStyle().Background(bgHLColor).Foreground(fg2Color)
 	bar = lipgloss.NewStyle().Background(bgDarkColor).Foreground(commentColor)
 	searchHit = lipgloss.NewStyle().Background(c(t.Search)).Foreground(fgColor)
+	caret = lipgloss.NewStyle().Background(blueColor).Foreground(bgColor)
 	// lift brightens the dim colours of a highlighted row, which would be hard to read on its background
 	lift = strings.NewReplacer(fgParam(commentColor), fgParam(dark5Color), fgParam(gutterColor), fgParam(dark5Color))
 	return true

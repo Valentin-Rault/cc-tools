@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -206,15 +205,15 @@ func zellijBin() string {
 
 // MoveToTabs asks the plugin to move these panes, one "<pane> <placeholder> <tab name>" line each; zellij launches
 // the plugin the first time. zellij 0.45.1 can't move a pane into most existing tabs, so for a tab that exists
-// pr-watch opens a placeholder pane in it, without focus, and the plugin replaces it with the pane; "-" sends the pane
-// to a new tab. A placeholder the plugin doesn't use closes by itself.
+// pr-watch opens a floating placeholder pane in it, without focus: the plugin swaps the pane in for it and embeds it,
+// and zellij places it among the tab's tiled panes as it places a new pane, by the tab's swap layout while the tab
+// follows one (into its stack, with a layout that has one). "-" sends the pane to a new tab. A placeholder the plugin
+// doesn't use closes by itself.
 //
-// The placeholder is a split (--direction), not a pane zellij places itself: in a tab with a stack, zellij puts a
-// pane it places in the stack, collapsed, and once the tab is drawn a collapsed pane isn't among the tab's tiled
-// panes anymore. Replacing such a placeholder takes the session's pane out of its tab and then drops it: the session
-// runs on with no pane. A split stays out of the stack, so the session lands beside it. A placeholder that isn't a
-// plain pane all the same isn't used: that session stays where it is, to be asked again. A tab with no room for a
-// placeholder at all leaves its moves out, in a NoRoomError.
+// The placeholder floats so that a move leaves the tab's panes alone. A split would shrink a pane on every move, and
+// stop the tab following its swap layout, as any split does; a pane zellij places itself can land collapsed in a
+// stack, and swapping the session's pane in for that one loses the pane (zellij-tabs/src/main.rs has the details). A
+// placeholder zellij doesn't list as floating isn't used: that session stays where it is, to be asked again.
 func (z zellijMux) MoveToTabs(moves []Move) error {
 	if len(moves) == 0 {
 		return nil
@@ -225,80 +224,59 @@ func (z zellijMux) MoveToTabs(moves []Move) error {
 	zellijSession := moves[0].Spot.Where
 	ids := tabIDs(zellijSession)
 	var lines []string
-	var full []Move
 	for _, m := range moves {
 		placeholder := "-"
 		if id, ok := ids[m.Tab]; ok {
-			var err error
-			if placeholder, err = openPlaceholder(zellijSession, id); err != nil {
+			out, err := zellij(zellijSession, "new-pane", "--floating", "--tab-id", strconv.Itoa(id), "--no-focus",
+				"--close-on-exit", "--name", "pr-watch is moving a session here", "--", "sleep", "20")
+			if err != nil {
 				return err
 			}
-			if placeholder == "" {
-				full = append(full, m)
-				continue
-			}
+			placeholder = strings.TrimPrefix(strings.TrimSpace(out), "terminal_")
 			panes, err := zellijPanes(zellijSession)
 			if err != nil {
 				return err
 			}
-			if !plainPane(panes, placeholder) {
+			if !floatingPane(panes, placeholder) {
 				continue
 			}
 		}
 		lines = append(lines, m.Spot.Pane+" "+placeholder+" "+m.Tab)
 	}
-	if err := z.pipeMoves(zellijSession, lines); err != nil {
-		return err
-	}
-	if len(full) > 0 {
-		return NoRoomError{full}
-	}
-	return nil
-}
-
-// openPlaceholder opens a placeholder in the tab: a split below the pane focused there, or beside it when that pane
-// is too short to halve. zellij says nothing when it opens neither, the pane being too small both ways: "".
-func openPlaceholder(zellijSession string, tab int) (string, error) {
-	for _, direction := range []string{"down", "right"} {
-		out, err := zellij(zellijSession, "new-pane", "--tab-id", strconv.Itoa(tab), "--direction", direction, "--no-focus",
-			"--close-on-exit", "--name", "pr-watch is moving a session here", "--", "sleep", "20")
-		if err != nil {
-			return "", err
-		}
-		if pane := strings.TrimPrefix(strings.TrimSpace(out), "terminal_"); pane != "" {
-			return pane, nil
-		}
-	}
-	return "", nil
-}
-
-// pipeMoves hands the plugin its "<pane> <placeholder> <tab name>" lines.
-func (z zellijMux) pipeMoves(zellijSession string, lines []string) error {
 	if len(lines) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "zellij", "--session", zellijSession, "pipe", "--plugin", "file:"+z.plugin,
-		"--name", "move", "--", strings.Join(lines, "\n")).CombinedOutput()
+		"--plugin-configuration", tabsProtocol, "--name", "place", "--", strings.Join(lines, "\n")).CombinedOutput()
 	answer := strings.TrimSpace(string(out))
 	switch {
 	case ctx.Err() != nil:
-		return errors.New("the tabs plugin didn't answer: grant it its permissions in zellij")
+		return fmt.Errorf("the tabs plugin didn't answer: grant it its permissions in zellij, which "+
+			"`zellij plugin --floating -- file:%s` asks for", z.plugin)
 	case err != nil:
 		return fmt.Errorf("zellij pipe: %v %s", err, answer)
+	case strings.Contains(answer, "expected --name"):
+		return fmt.Errorf("the tabs plugin is older than pr-watch (it says %q): run make install, with cargo", answer)
 	case !strings.HasPrefix(answer, "queued"):
 		return fmt.Errorf("tabs plugin: %q", cmp.Or(answer, "no answer"))
 	}
 	return nil
 }
 
-// plainPane: zellij lists the pane, tiled and shown. A floating pane would make the session float; a suppressed one
-// (collapsed in a stack) or one zellij didn't open would lose it.
-func plainPane(panes map[int]zellijPane, pane string) bool {
+// tabsProtocol is the configuration pr-watch launches the plugin with. zellij keeps running the plugin instance it
+// launched, and tells instances apart by their configuration: a new protocol has zellij launch the plugin installed
+// now, not keep using one an older pr-watch started. The pipe's name changes with it, so an older plugin turns the
+// moves down instead of making them its way.
+const tabsProtocol = "protocol=2"
+
+// floatingPane: zellij lists the pane, floating. A tiled one might be collapsed in a stack, or become so once its tab
+// is drawn, and swapping a pane in for that one loses the pane; one zellij didn't open would too.
+func floatingPane(panes map[int]zellijPane, pane string) bool {
 	id, err := strconv.Atoi(pane)
 	p, ok := panes[id]
-	return err == nil && ok && !p.IsSuppressed && !p.IsFloating
+	return err == nil && ok && p.IsFloating && !p.IsSuppressed
 }
 
 // tabIDs is the ID of each tab of a zellij session, by its name without badges; the first tab of a name wins.

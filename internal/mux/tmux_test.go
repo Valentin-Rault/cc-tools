@@ -172,12 +172,13 @@ func TestDetect(t *testing.T) {
 	}
 }
 
-// A session's pane only replaces a placeholder zellij lists as a tiled, shown pane: any other would lose the session.
-func TestPlainPane(t *testing.T) {
+// A session's pane only replaces a placeholder zellij lists as floating: a tiled one may be collapsed in a stack, and
+// swapping the session's pane in for that one loses it.
+func TestFloatingPane(t *testing.T) {
 	panes := map[int]zellijPane{4: {ID: 4}, 5: {ID: 5, IsSuppressed: true}, 6: {ID: 6, IsFloating: true}}
-	for pane, want := range map[string]bool{"4": true, "5": false, "6": false, "7": false, "": false} {
-		if got := plainPane(panes, pane); got != want {
-			t.Errorf("plainPane(%q) = %v, want %v", pane, got, want)
+	for pane, want := range map[string]bool{"4": false, "5": false, "6": true, "7": false, "": false} {
+		if got := floatingPane(panes, pane); got != want {
+			t.Errorf("floatingPane(%q) = %v, want %v", pane, got, want)
 		}
 	}
 }

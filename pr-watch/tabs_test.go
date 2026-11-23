@@ -73,17 +73,16 @@ func TestPlan(t *testing.T) {
 }
 
 // fakeZellij answers zellij pipe like the plugin, list-tabs with tabs, new-pane with pane 90, and list-panes with the
-// file panes beside calls: pane 90, a plain pane. It records the payloads it was piped in calls, and the new-pane
-// commands in calls.new.
+// file panes beside calls: pane 90, a floating pane. It records the payloads it was piped in calls, the pipe's
+// arguments in calls.args, and the new-pane commands in calls.new.
 func fakeZellij(t *testing.T, answer, tabs string) (plugin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
 	plugin = filepath.Join(dir, "pr-watch-tabs.wasm")
 	os.WriteFile(plugin, []byte("wasm"), 0o644)
 	calls = filepath.Join(dir, "calls")
-	os.WriteFile(filepath.Join(dir, "panes"), []byte(`[{"id":90}]`), 0o644)
-	// a split direction listed in the file "full" has no room: zellij opens nothing and says nothing, exit 0
-	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nlist-panes) cat \""+dir+"/panes\"; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; grep -qx \"$8\" \""+dir+"/full\" 2>/dev/null || echo terminal_90; exit;;\nesac\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
+	os.WriteFile(filepath.Join(dir, "panes"), []byte(`[{"id":90,"is_floating":true}]`), 0o644)
+	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nlist-panes) cat \""+dir+"/panes\"; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; echo terminal_90; exit;;\nesac\necho \"$*\" >> \""+calls+".args\"\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	return plugin, calls
 }
@@ -106,8 +105,11 @@ func TestArrange(t *testing.T) {
 	if got, _ := os.ReadFile(calls); string(got) != "z 12 90 In review\n--\n" {
 		t.Errorf("zellij pipe calls %q", got)
 	}
-	if got, _ := os.ReadFile(calls + ".new"); !strings.Contains(string(got), "new-pane --tab-id 6 --direction down --no-focus") {
+	if got, _ := os.ReadFile(calls + ".new"); !strings.Contains(string(got), "new-pane --floating --tab-id 6 --no-focus") {
 		t.Errorf("the placeholder in In review: %q", got)
+	}
+	if got, _ := os.ReadFile(calls + ".args"); !strings.Contains(string(got), "pipe --plugin file:"+plugin+" --plugin-configuration protocol=2 --name place -- ") {
+		t.Errorf("the pipe: %q", got)
 	}
 	if p := store.TabsPlaced(); p["a"] != "" || p["b"] != stageWIP {
 		t.Errorf("placed after asking = %v: a isn't there yet", p)
@@ -136,61 +138,31 @@ func TestArrangeAsksOncePerZellijSessionInStageOrder(t *testing.T) {
 	}
 }
 
-// A placeholder collapsed in a stack would lose the session's pane: the plugin isn't asked, and the move counts as a
-// try that didn't happen.
-func TestArrangeLeavesAPaneWhosePlaceholderIsInAStack(t *testing.T) {
-	plugin, calls := fakeZellij(t, "queued 1", `[{"name":"In review","tab_id":6}]`)
-	os.WriteFile(filepath.Join(filepath.Dir(calls), "panes"), []byte(`[{"id":90,"is_suppressed":true}]`), 0o644)
-	tries := map[string]int{}
-	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}}}
-	asked, _, err := arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, tries)
-	if err != nil || len(asked) != 1 || tries["a"] != 1 {
-		t.Fatalf("asked %v, tries %v, err %v", asked, tries, err)
-	}
-	if got, err := os.ReadFile(calls); err == nil {
-		t.Errorf("the plugin was asked: %q", got)
-	}
-}
-
-// zellij won't halve a pane that's too short: the placeholder goes beside it instead.
-func TestArrangeSplitsBesideAPaneTooShortToHalve(t *testing.T) {
-	plugin, calls := fakeZellij(t, "queued 1", `[{"name":"In review","tab_id":6}]`)
-	os.WriteFile(filepath.Join(filepath.Dir(calls), "full"), []byte("down\n"), 0o644)
-	tries := map[string]int{}
-	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}}}
-	asked, _, err := arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, tries)
-	if err != nil || len(asked) != 1 || tries["a"] != 1 {
-		t.Fatalf("asked %v, tries %v, err %v", asked, tries, err)
-	}
-	if got, _ := os.ReadFile(calls + ".new"); !strings.Contains(string(got), "--direction down") || !strings.Contains(string(got), "--direction right") {
-		t.Errorf("placeholders: %q", got)
-	}
-	if got, _ := os.ReadFile(calls); string(got) != "z 12 90 In review\n--\n" {
-		t.Errorf("zellij pipe calls %q", got)
-	}
-}
-
-// A tab with no room either way: that session waits, without counting tries, so it moves once you make room; the
-// others move all the same, and the error says which.
-func TestArrangeWaitsForRoomInAFullTab(t *testing.T) {
-	plugin, calls := fakeZellij(t, "queued 1", `[{"name":"In review","tab_id":6}]`)
-	os.WriteFile(filepath.Join(filepath.Dir(calls), "full"), []byte("down\nright\n"), 0o644)
-	tries := map[string]int{}
-	moves := []tabMove{
-		{Session: Session{SessionID: "a", Name: "pr-4322-ad"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}},
-		{Session: Session{SessionID: "b", Name: "b"}, Stage: stageDone, Act: "move", spot: mux.Spot{Where: "z", Pane: "13"}},
-	}
-	for round := 0; round < maxTries+1; round++ {
+// Only a floating placeholder is safe to swap a session's pane in for: a tiled one may be collapsed in a stack, and
+// that loses the pane. With any other, the plugin isn't asked, and the move counts as a try that didn't happen.
+func TestArrangeLeavesAPaneWhosePlaceholderDoesntFloat(t *testing.T) {
+	for _, panes := range []string{`[{"id":90}]`, `[{"id":90,"is_suppressed":true}]`, `[]`} {
+		plugin, calls := fakeZellij(t, "queued 1", `[{"name":"In review","tab_id":6}]`)
+		os.WriteFile(filepath.Join(filepath.Dir(calls), "panes"), []byte(panes), 0o644)
+		tries := map[string]int{}
+		moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}}}
 		asked, _, err := arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, tries)
-		if err == nil || err.Error() != "no room in the In review tab for pr-4322-ad: make room there and it moves" {
-			t.Fatalf("round %d: err %v", round, err)
+		if err != nil || len(asked) != 1 || tries["a"] != 1 {
+			t.Fatalf("%s: asked %v, tries %v, err %v", panes, asked, tries, err)
 		}
-		if len(asked) != 1 || asked[0].Session.SessionID != "b" || tries["a"] != 0 {
-			t.Fatalf("round %d: asked %v, tries %v", round, asked, tries)
+		if got, err := os.ReadFile(calls); err == nil {
+			t.Errorf("%s: the plugin was asked: %q", panes, got)
 		}
 	}
-	if got, _ := os.ReadFile(calls); !strings.HasPrefix(string(got), "z 13 - Done\n--\n") || strings.Contains(string(got), " 12 ") {
-		t.Errorf("zellij pipe calls %q", got)
+}
+
+// A plugin older than pr-watch turns the pipe down without moving anything: pr-watch says to install the new one.
+func TestArrangeTellsAnOlderPlugin(t *testing.T) {
+	plugin, _ := fakeZellij(t, "error: expected --name move", `[{"name":"In review","tab_id":6}]`)
+	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}}}
+	_, _, err := arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, map[string]int{})
+	if err == nil || !strings.Contains(err.Error(), "older than pr-watch") || !strings.Contains(err.Error(), "make install") {
+		t.Errorf("err %v", err)
 	}
 }
 

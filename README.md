@@ -242,12 +242,15 @@ gets two for the same PRs.
 tmux moves a pane to another window itself (`join-pane`, `break-pane`); a pane alone in its window takes the window
 along, renamed. zellij's command line can't move a pane to another tab, so there a small plugin does
 (`zellij-tabs/`, Rust built for `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
-`zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`. In zellij 0.45.1 the plugin API
-can't move a pane into most existing tabs either, so pr-watch opens a placeholder pane in the tab, without focus, and
-the plugin swaps the session's pane in for it. The placeholder is a split, so in a tab where you stacked the panes the
-session lands beside the stack, not in it: zellij loses a pane swapped in for one collapsed in a stack. It splits the
-pane focused in that tab, below it, or beside it when that pane is too short to halve. When zellij has no room either
-way, the session stays where it is and pr-watch says so; it moves once you make room in that tab.
+`zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`, and again when an install adds
+one: pr-watch then says the plugin didn't answer. In zellij 0.45.1 the plugin API can't move a pane into most existing tabs
+either, so pr-watch opens a floating placeholder pane in the tab, without focus, the plugin swaps the session's pane
+in for it, and then embeds it: zellij places the session among the tab's panes as it places a new one. In a tab that
+follows a swap layout, the session lands where the layout puts a new pane, in its stack if it has one, and the tab
+keeps following its layout, so moves never shrink your panes. In a tab you arranged by hand, zellij splits a pane with
+room to spare, or adds to a stack. The plugin swaps and embeds only panes zellij lists where it expects them, since
+zellij loses a pane swapped in for one collapsed in a stack (`zellij-tabs/src/main.rs` explains why it takes all
+that).
 
 ### Plugins
 

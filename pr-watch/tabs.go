@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -180,7 +181,8 @@ func (v tabView) plan(sessions []Session, spots map[string]mux.Spot, placed map[
 
 // arrange asks the multiplexer for the moves and records the sessions seen in their tab. A move counts once
 // pr-watch sees the pane in its tab, on a later round: zellij's plugin moves panes one at a time, after answering.
-// Without a multiplexer nothing moves.
+// A move into a tab with no room for another pane isn't a try: it's asked again each round, and happens once you
+// make room there. Without a multiplexer nothing moves.
 func arrange(store Store, mx mux.Mux, moves []tabMove, tries map[string]int) (asked, arrived []tabMove, err error) {
 	placed := store.TabsPlaced()
 	moves = slices.Clone(moves) // in stage order, so new tabs are created in that order too
@@ -202,6 +204,7 @@ func arrange(store Store, mx mux.Mux, moves []tabMove, tries map[string]int) (as
 			byWhere[m.spot.Where] = append(byWhere[m.spot.Where], m)
 		}
 	}
+	var full []string
 	for _, w := range wheres {
 		if mx == nil {
 			break
@@ -210,13 +213,22 @@ func arrange(store Store, mx mux.Mux, moves []tabMove, tries map[string]int) (as
 		for _, m := range byWhere[w] {
 			ms = append(ms, mux.Move{Spot: m.spot, Tab: m.Stage})
 		}
-		if err = mx.MoveToTabs(ms); err != nil {
+		var noRoom mux.NoRoomError
+		if err = mx.MoveToTabs(ms); err != nil && !errors.As(err, &noRoom) {
 			break
 		}
+		err = nil
 		for _, m := range byWhere[w] {
+			if slices.ContainsFunc(noRoom.Moves, func(n mux.Move) bool { return n.Spot == m.spot }) {
+				full = append(full, fmt.Sprintf("no room in the %s tab for %s", m.Stage, m.Session.Name))
+				continue
+			}
 			tries[m.Session.SessionID]++
 			asked = append(asked, m)
 		}
+	}
+	if err == nil && len(full) > 0 {
+		err = errors.New(strings.Join(full, ", ") + ": make room there and it moves")
 	}
 	if serr := store.SaveTabsPlaced(placed); err == nil {
 		err = serr

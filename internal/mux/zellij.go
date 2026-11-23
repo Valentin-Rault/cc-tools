@@ -213,7 +213,8 @@ func zellijBin() string {
 // pane it places in the stack, collapsed, and once the tab is drawn a collapsed pane isn't among the tab's tiled
 // panes anymore. Replacing such a placeholder takes the session's pane out of its tab and then drops it: the session
 // runs on with no pane. A split stays out of the stack, so the session lands beside it. A placeholder that isn't a
-// plain pane all the same isn't used: that session stays where it is, to be asked again.
+// plain pane all the same isn't used: that session stays where it is, to be asked again. A tab with no room for a
+// placeholder at all leaves its moves out, in a NoRoomError.
 func (z zellijMux) MoveToTabs(moves []Move) error {
 	if len(moves) == 0 {
 		return nil
@@ -224,15 +225,18 @@ func (z zellijMux) MoveToTabs(moves []Move) error {
 	zellijSession := moves[0].Spot.Where
 	ids := tabIDs(zellijSession)
 	var lines []string
+	var full []Move
 	for _, m := range moves {
 		placeholder := "-"
 		if id, ok := ids[m.Tab]; ok {
-			out, err := zellij(zellijSession, "new-pane", "--tab-id", strconv.Itoa(id), "--direction", "down", "--no-focus",
-				"--close-on-exit", "--name", "pr-watch is moving a session here", "--", "sleep", "20")
-			if err != nil {
+			var err error
+			if placeholder, err = openPlaceholder(zellijSession, id); err != nil {
 				return err
 			}
-			placeholder = strings.TrimPrefix(strings.TrimSpace(out), "terminal_")
+			if placeholder == "" {
+				full = append(full, m)
+				continue
+			}
 			panes, err := zellijPanes(zellijSession)
 			if err != nil {
 				return err
@@ -243,6 +247,33 @@ func (z zellijMux) MoveToTabs(moves []Move) error {
 		}
 		lines = append(lines, m.Spot.Pane+" "+placeholder+" "+m.Tab)
 	}
+	if err := z.pipeMoves(zellijSession, lines); err != nil {
+		return err
+	}
+	if len(full) > 0 {
+		return NoRoomError{full}
+	}
+	return nil
+}
+
+// openPlaceholder opens a placeholder in the tab: a split below the pane focused there, or beside it when that pane
+// is too short to halve. zellij says nothing when it opens neither, the pane being too small both ways: "".
+func openPlaceholder(zellijSession string, tab int) (string, error) {
+	for _, direction := range []string{"down", "right"} {
+		out, err := zellij(zellijSession, "new-pane", "--tab-id", strconv.Itoa(tab), "--direction", direction, "--no-focus",
+			"--close-on-exit", "--name", "pr-watch is moving a session here", "--", "sleep", "20")
+		if err != nil {
+			return "", err
+		}
+		if pane := strings.TrimPrefix(strings.TrimSpace(out), "terminal_"); pane != "" {
+			return pane, nil
+		}
+	}
+	return "", nil
+}
+
+// pipeMoves hands the plugin its "<pane> <placeholder> <tab name>" lines.
+func (z zellijMux) pipeMoves(zellijSession string, lines []string) error {
 	if len(lines) == 0 {
 		return nil
 	}

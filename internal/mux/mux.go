@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -23,6 +24,7 @@ type Mux interface {
 	// Locate finds the panes these processes run in, by process ID; a process outside the multiplexer has none.
 	Locate(pids []int) map[int]Spot
 	// MoveToTabs moves panes, all from the same Where, to the tab named in each move, creating it when there's none.
+	// A NoRoomError is the moves it left out for want of room in their tab.
 	MoveToTabs(moves []Move) error
 }
 
@@ -38,6 +40,20 @@ type Spot struct {
 type Move struct {
 	Spot Spot
 	Tab  string
+}
+
+// NoRoomError is the moves MoveToTabs left out because their tab had no room for another pane; it made the others.
+// Asking again once there's room is enough.
+type NoRoomError struct{ Moves []Move }
+
+func (e NoRoomError) Error() string {
+	var tabs []string
+	for _, m := range e.Moves {
+		if !slices.Contains(tabs, m.Tab) {
+			tabs = append(tabs, m.Tab)
+		}
+	}
+	return "no room for another pane in " + strings.Join(tabs, ", ")
 }
 
 // Detect is the multiplexer the caller runs in, from its environment; nil outside one. A multiplexer started from a

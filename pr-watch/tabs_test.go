@@ -74,7 +74,7 @@ func TestPlan(t *testing.T) {
 
 // fakeZellij answers zellij pipe like the plugin, list-tabs with tabs, new-pane with pane 90, and list-panes with the
 // file panes beside calls: pane 90, a floating pane. It records the payloads it was piped in calls, the pipe's
-// arguments in calls.args, and the new-pane commands in calls.new.
+// arguments in calls.args, the new-pane commands in calls.new, and the plugin reloads in calls.reload.
 func fakeZellij(t *testing.T, answer, tabs string) (plugin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -82,7 +82,7 @@ func fakeZellij(t *testing.T, answer, tabs string) (plugin, calls string) {
 	os.WriteFile(plugin, []byte("wasm"), 0o644)
 	calls = filepath.Join(dir, "calls")
 	os.WriteFile(filepath.Join(dir, "panes"), []byte(`[{"id":90,"is_floating":true}]`), 0o644)
-	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nlist-panes) cat \""+dir+"/panes\"; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; echo terminal_90; exit;;\nesac\necho \"$*\" >> \""+calls+".args\"\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
+	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '"+tabs+"'; exit;;\nlist-panes) cat \""+dir+"/panes\"; exit;;\nnew-pane) echo \"$*\" >> \""+calls+".new\"; echo terminal_90; exit;;\nstart-or-reload-plugin) echo \"$*\" >> \""+calls+".reload\"; exit;;\nesac\necho \"$*\" >> \""+calls+".args\"\nfor a; do last=$a; done\nprintf '%s\\n--\\n' \"$2 $last\" >> \""+calls+"\"\necho '"+answer+"'\n"), 0o755)
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 	return plugin, calls
 }
@@ -156,13 +156,25 @@ func TestArrangeLeavesAPaneWhosePlaceholderDoesntFloat(t *testing.T) {
 	}
 }
 
-// A plugin older than pr-watch turns the pipe down without moving anything: pr-watch says to install the new one.
+// A plugin older than pr-watch turns the pipe down without moving anything. zellij may be running an older copy of
+// the one installed, as it keeps the plugins it compiled: pr-watch has it load the file again, once. Still older
+// after that, the file is: pr-watch says to install the new one.
 func TestArrangeTellsAnOlderPlugin(t *testing.T) {
-	plugin, _ := fakeZellij(t, "error: expected --name move", `[{"name":"In review","tab_id":6}]`)
+	plugin, calls := fakeZellij(t, "error: expected --name move", `[{"name":"In review","tab_id":6}]`)
 	moves := []tabMove{{Session: Session{SessionID: "a"}, Stage: stageReview, Act: "move", spot: mux.Spot{Where: "z", Pane: "12"}}}
 	_, _, err := arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, map[string]int{})
+	if err == nil || !strings.Contains(err.Error(), "older copy") {
+		t.Errorf("the first time: %v", err)
+	}
+	if got, _ := os.ReadFile(calls + ".reload"); string(got) != "--session z action start-or-reload-plugin --configuration protocol=2 file:"+plugin+"\n" {
+		t.Errorf("reloads: %q", got)
+	}
+	_, _, err = arrange(Store{Dir: t.TempDir()}, mux.NewZellij("", plugin), moves, map[string]int{})
 	if err == nil || !strings.Contains(err.Error(), "older than pr-watch") || !strings.Contains(err.Error(), "make install") {
-		t.Errorf("err %v", err)
+		t.Errorf("once reloaded: %v", err)
+	}
+	if got, _ := os.ReadFile(calls + ".reload"); strings.Count(string(got), "\n") != 1 {
+		t.Errorf("reloaded again: %q", got)
 	}
 }
 

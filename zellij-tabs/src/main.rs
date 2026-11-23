@@ -21,17 +21,19 @@
 //! stack. A placeholder that's a split instead would shrink a pane on every move, and stop the tab following its swap
 //! layout, as any split does.
 //!
-//! The plugin acts on what zellij reports of its panes (PaneUpdate), never on a guess: it swaps a pane in only for a
-//! placeholder zellij lists as floating, and it embeds the pane only once zellij lists it floating in the
-//! placeholder's tab, since embedding is a toggle that would float a tiled pane. A step whose pane doesn't show up as
-//! expected within a few seconds is left alone, and pr-watch asks again.
+//! The plugin acts on what zellij says of the panes when it asks (get_pane_info), never on a guess: it swaps a pane in
+//! only for a placeholder that floats, and it embeds the pane only once it floats and the placeholder is gone, which
+//! zellij does only when the swap worked: embedding is a toggle, and would float a tiled pane. It asks each time
+//! rather than following zellij's pane updates (PaneUpdate): zellij stops sending those to a plugin whose
+//! permissions you allowed after it started. A step whose panes aren't as expected within a few seconds is left
+//! alone, and pr-watch asks again.
 
 use std::collections::{BTreeMap, VecDeque};
 use zellij_tile::prelude::*;
 
 /// How long to wait after a step before the next one, for zellij to settle.
 const SETTLE_SECS: f64 = 0.3;
-/// How often a step waiting for zellij to report a pane looks again, and how many times.
+/// How often a step waiting for zellij looks at the panes again, and how many times.
 const POLL_SECS: f64 = 0.1;
 const POLLS: u32 = 30;
 
@@ -44,15 +46,14 @@ struct Move {
 /// What the move in progress waits for.
 enum Step {
     Idle,
-    /// zellij to list the placeholder, floating, before the pane is swapped in.
+    /// the placeholder, floating, before the pane is swapped in.
     Swap { m: Move, polls: u32 },
-    /// zellij to list the pane floating in the placeholder's tab (by position) before it's embedded.
-    Embed { pane: u32, tab: usize, polls: u32 },
+    /// the pane floating, and the placeholder gone, before the pane is embedded.
+    Embed { pane: u32, placeholder: u32, polls: u32 },
 }
 
 struct State {
     granted: bool,
-    panes: Option<PaneManifest>,
     queue: VecDeque<Move>,
     step: Step,
     waiting: bool, // a timer is set: the next step waits for it
@@ -60,7 +61,7 @@ struct State {
 
 impl Default for State {
     fn default() -> Self {
-        State { granted: false, panes: None, queue: VecDeque::new(), step: Step::Idle, waiting: false }
+        State { granted: false, queue: VecDeque::new(), step: Step::Idle, waiting: false }
     }
 }
 
@@ -73,7 +74,7 @@ impl ZellijPlugin for State {
             PermissionType::ReadCliPipes,
             PermissionType::ReadApplicationState,
         ]);
-        subscribe(&[EventType::PermissionRequestResult, EventType::Timer, EventType::PaneUpdate]);
+        subscribe(&[EventType::PermissionRequestResult, EventType::Timer]);
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -84,7 +85,6 @@ impl ZellijPlugin for State {
                 hide_self();
             }
             Event::PermissionRequestResult(PermissionStatus::Denied) => self.queue.clear(),
-            Event::PaneUpdate(panes) => self.panes = Some(panes),
             Event::Timer(_) => self.waiting = false,
             _ => {}
         }
@@ -159,10 +159,10 @@ impl State {
                 }
                 Step::Swap { m, polls } => {
                     let placeholder = m.placeholder.unwrap_or_default();
-                    match self.find(placeholder) {
-                        Some((tab, p)) if p.is_floating && !p.is_suppressed => {
+                    match get_pane_info(PaneId::Terminal(placeholder)) {
+                        Some(p) if p.is_floating && !p.is_suppressed => {
                             replace_pane_with_existing_pane(PaneId::Terminal(placeholder), PaneId::Terminal(m.pane), false);
-                            self.step = Step::Embed { pane: m.pane, tab, polls: 0 };
+                            self.step = Step::Embed { pane: m.pane, placeholder, polls: 0 };
                             return self.wait(POLL_SECS);
                         }
                         Some(_) => {} // not floating: swapping into it could lose the pane
@@ -173,17 +173,20 @@ impl State {
                         None => {} // it never showed up
                     }
                 }
-                Step::Embed { pane, tab, polls } => match self.find(pane) {
-                    Some((t, p)) if t == tab && p.is_floating => {
-                        toggle_pane_embed_or_eject_for_pane_id(PaneId::Terminal(pane));
-                        return self.wait(SETTLE_SECS);
+                Step::Embed { pane, placeholder, polls } => {
+                    let swapped = get_pane_info(PaneId::Terminal(placeholder)).is_none();
+                    match get_pane_info(PaneId::Terminal(pane)) {
+                        Some(p) if swapped && p.is_floating => {
+                            toggle_pane_embed_or_eject_for_pane_id(PaneId::Terminal(pane));
+                            return self.wait(SETTLE_SECS);
+                        }
+                        _ if polls < POLLS => {
+                            self.step = Step::Embed { pane, placeholder, polls: polls + 1 };
+                            return self.wait(POLL_SECS);
+                        }
+                        _ => {} // the swap didn't happen: the pane stays where it is
                     }
-                    _ if polls < POLLS => {
-                        self.step = Step::Embed { pane, tab, polls: polls + 1 };
-                        return self.wait(POLL_SECS);
-                    }
-                    _ => {} // it never arrived floating: it stays where it is
-                },
+                }
             }
         }
     }
@@ -191,13 +194,6 @@ impl State {
     fn wait(&mut self, secs: f64) {
         self.waiting = true;
         set_timeout(secs);
-    }
-
-    /// find is the tab position and pane of a terminal pane, as zellij last reported them.
-    fn find(&self, id: u32) -> Option<(usize, &PaneInfo)> {
-        self.panes.as_ref()?.panes.iter().find_map(|(tab, panes)| {
-            panes.iter().find(|p| !p.is_plugin && p.id == id).map(|p| (*tab, p))
-        })
     }
 }
 

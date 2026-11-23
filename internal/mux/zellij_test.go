@@ -16,8 +16,9 @@ import (
 // stack into a stack list, all but its shown pane among the suppressed panes, only in a tab a client draws. It has
 // its own HOME, so none of your config or plugin permissions, and its own socket directory, so your zellij doesn't
 // list it. Its tabs follow the swap layout "half-stacked" from five panes on: one pane on the left, a stack on the
-// right. It returns the tabs plugin, built with cargo, with its permissions granted.
-func zellijServer(t *testing.T) (plugin string) {
+// right. It returns the tabs plugin, built with cargo, and the tmux the client runs in. The plugin has its permissions,
+// or with granted false only those an older plugin needed: zellij asks for the others.
+func zellijServer(t *testing.T, granted bool) (plugin, client string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("starts zellij")
@@ -44,6 +45,9 @@ func zellijServer(t *testing.T) (plugin string) {
 	plugin = filepath.Join(dir, "pr-watch-tabs.wasm")
 	home, config := filepath.Join(dir, "home"), filepath.Join(dir, "home", ".config", "zellij")
 	grant := `"` + plugin + `" {` + "\n    ChangeApplicationState\n    ReadCliPipes\n    ReadApplicationState\n}\n"
+	if !granted {
+		grant = `"` + plugin + `" {` + "\n    ChangeApplicationState\n    ReadCliPipes\n}\n"
+	}
 	files := map[string]string{
 		plugin:                              string(wasm),
 		filepath.Join(config, "config.kdl"): "show_startup_tips false\nshow_release_notes false\n",
@@ -83,18 +87,18 @@ func zellijServer(t *testing.T) (plugin string) {
 		t.Setenv(k, "")
 		os.Unsetenv(k) // zellij won't start inside another, nor tmux inside another
 	}
-	socket := filepath.Join(dir, "t")
-	client := exec.Command("tmux", "-S", socket, "-f", "/dev/null", "new-session", "-d", "-x", "200", "-y", "50",
+	client = filepath.Join(dir, "t")
+	attach := exec.Command("tmux", "-S", client, "-f", "/dev/null", "new-session", "-d", "-x", "200", "-y", "50",
 		zellijBin()+" --config-dir "+config+" attach --create bed")
-	if out, err := client.CombinedOutput(); err != nil {
+	if out, err := attach.CombinedOutput(); err != nil {
 		t.Fatalf("tmux: %v %s", err, out)
 	}
 	t.Cleanup(func() {
 		exec.Command(zellijBin(), "kill-session", "bed").Run()
-		exec.Command("tmux", "-S", socket, "kill-server").Run()
+		exec.Command("tmux", "-S", client, "kill-server").Run()
 	})
 	eventually(t, "zellij starts", func() bool { _, err := zellij("bed", "list-tabs", "--json"); return err == nil })
-	return plugin
+	return plugin, client
 }
 
 // eventually waits up to 10 seconds for ok.
@@ -193,7 +197,7 @@ func look(t *testing.T, tab string) {
 // tab following its layout, until zellij had no room left for one. A session hidden in a stack moves out of it too,
 // to a tab that exists and to a new one.
 func TestZellijMovesIntoTheStack(t *testing.T) {
-	plugin := zellijServer(t)
+	plugin, _ := zellijServer(t, true)
 	z := zellijMux{here: "bed", plugin: plugin}
 	bedRun(t, "new-tab", "--name", "In review")
 	review := strconv.Itoa(bedTabs(t)["In review"].TabID)
@@ -272,4 +276,96 @@ func TestZellijMovesIntoTheStack(t *testing.T) {
 		return err == nil && panes[hidden[0]].TabName == "Main" && !panes[hidden[0]].IsFloating && panes[hidden[1]].TabName == "Done"
 	})
 	eventually(t, "the placeholder gone", func() bool { panes, err := listBedPanes(); return err == nil && len(panes) == count })
+}
+
+// A plugin that doesn't answer waits for its permissions, which zellij asks for in a floating pane in the plugin's
+// tab: pr-watch says which tab. When zellij shows no question, as for a plugin it launched for a pipe, pr-watch has it
+// load the plugin again, once, which has it ask; after that, it says how to.
+func TestZellijPluginWaitingForPermissions(t *testing.T) {
+	dir := t.TempDir()
+	plugin := filepath.Join(dir, "pr-watch-tabs.wasm")
+	os.WriteFile(plugin, []byte("wasm"), 0o644)
+	panes, reloads := filepath.Join(dir, "panes"), filepath.Join(dir, "reloads")
+	os.WriteFile(filepath.Join(dir, "zellij"), []byte("#!/bin/sh\ncase \"$4\" in\nlist-tabs) echo '[]'; exit;;\n"+
+		"list-panes) cat \""+panes+"\"; exit;;\nstart-or-reload-plugin|show-floating-panes) echo \"$*\" >> \""+reloads+"\"; exit;;\n"+
+		"esac\nexec sleep 5\n"), 0o755) // the pipe: no answer
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	was := pipeTimeout
+	pipeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { pipeTimeout = was })
+	z := zellijMux{plugin: plugin}
+	move := []Move{{Spot: Spot{Where: "s", Pane: "3"}, Tab: "Done"}}
+	reloaded := func() string { got, _ := os.ReadFile(reloads); return string(got) }
+
+	os.WriteFile(panes, []byte(`[]`), 0o644)
+	if err := z.MoveToTabs(move); err == nil || !strings.Contains(err.Error(), "zellij asks for them in the tab the plugin runs in") {
+		t.Errorf("no question shown: %v", err)
+	}
+	if got := reloaded(); got != "--session s action start-or-reload-plugin --configuration protocol=2 file:"+plugin+"\n" {
+		t.Errorf("reloads: %q", got)
+	}
+	if err := z.MoveToTabs(move); err == nil || !strings.Contains(err.Error(), "`zellij action start-or-reload-plugin --configuration protocol=2 file:"+plugin+"`") {
+		t.Errorf("still no question, after a reload: %v", err)
+	}
+	if got := reloaded(); strings.Count(got, "\n") != 1 {
+		t.Errorf("reloaded again: %q", got)
+	}
+
+	// zellij asks, floating behind the tab's hidden floating panes: pr-watch shows them, once
+	os.WriteFile(panes, []byte(`[{"id":4,"is_plugin":true,"is_floating":true,"plugin_url":"file:`+plugin+`","tab_id":7,"tab_name":"Tab #1 ◐"},`+
+		`{"id":5,"is_plugin":true,"is_floating":true,"plugin_url":"file:/other.wasm","tab_id":8,"tab_name":"Other"}]`), 0o644)
+	for range 2 {
+		if err := z.MoveToTabs(move); err == nil || !strings.Contains(err.Error(), "allow them in the Tab #1 tab") {
+			t.Errorf("zellij asks: %v", err)
+		}
+	}
+	if got := reloaded(); strings.Count(got, "show-floating-panes --tab-id 7\n") != 1 {
+		t.Errorf("shown: %q", got)
+	}
+}
+
+// A plugin that needs permissions it doesn't have yet waits for them: pr-watch has zellij ask, says in which tab, and
+// once you allow them there, the moves happen. zellij stops sending pane updates to a plugin allowed its permissions
+// after it started, which is why the plugin asks zellij about the panes it moves instead of following them.
+func TestZellijAsksForPermissionsThenMoves(t *testing.T) {
+	plugin, client := zellijServer(t, false)
+	was := pipeTimeout
+	pipeTimeout = time.Second
+	t.Cleanup(func() { pipeTimeout = was })
+	z := zellijMux{here: "bed", plugin: plugin}
+	bedRun(t, "new-tab", "--name", "In review")
+	bedRun(t, "go-to-tab-name", "Main")
+	pane := bedRun(t, "new-pane", "--tab-id", strconv.Itoa(bedTabs(t)["Main"].TabID), "--no-focus", "--", "sleep", "600")
+	move := []Move{{Spot: Spot{Where: "bed", Pane: pane}, Tab: "In review"}}
+
+	err := z.MoveToTabs(move)
+	if err == nil || !strings.Contains(err.Error(), "waits for its permissions") {
+		t.Fatalf("before you allow them: %v", err)
+	}
+	var tab string
+	eventually(t, "zellij asks for the permissions", func() bool { asking, ok := z.asking("bed"); tab = TabBase(asking.Name); return ok })
+	if err := z.MoveToTabs(move); err == nil || !strings.Contains(err.Error(), "allow them in the "+tab+" tab") {
+		t.Errorf("while zellij asks: %v", err)
+	}
+	bedRun(t, "go-to-tab-name", tab)
+	time.Sleep(300 * time.Millisecond)
+	if out, err := exec.Command("tmux", "-S", client, "send-keys", "y").CombinedOutput(); err != nil {
+		t.Fatalf("tmux: %v %s", err, out)
+	}
+	screen := func() string {
+		out, _ := exec.Command("tmux", "-S", client, "capture-pane", "-p").Output()
+		return string(out)
+	}
+	eventually(t, "zellij's question on the screen", func() bool { return strings.Contains(screen(), "asks permission") })
+	eventually(t, "the plugin has its permissions", func() bool { _, asking := z.asking("bed"); return !asking })
+	bedRun(t, "go-to-tab-name", "Main")
+
+	if err := z.MoveToTabs(move); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "pane "+pane+" in In review", func() bool {
+		panes, err := listBedPanes()
+		p, ok := panes[pane]
+		return err == nil && ok && p.TabName == "In review" && !p.IsFloating
+	})
 }

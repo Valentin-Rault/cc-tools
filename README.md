@@ -241,9 +241,10 @@ gets two for the same PRs.
 
 tmux moves a pane to another window itself (`join-pane`, `break-pane`); a pane alone in its window takes the window
 along, renamed. zellij's command line can't move a pane to another tab, so there a small plugin does
-(`zellij-tabs/`, Rust built for `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). Grant it its permissions once:
-`zellij plugin --floating -- file:$HOME/.config/zellij/plugins/pr-watch-tabs.wasm`, and again when an install adds
-one: pr-watch then says the plugin didn't answer. In zellij 0.45.1 the plugin API can't move a pane into most existing tabs
+(`zellij-tabs/`, Rust built for `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). zellij asks
+you for its permissions the first time pr-watch uses it, and again when an install needs new ones: pr-watch says in
+which tab zellij asks, so you can allow them there. zellij keeps running the copy of a plugin it compiled first, until
+it loads the file again: after an install, pr-watch has it do that once. In zellij 0.45.1 the plugin API can't move a pane into most existing tabs
 either, so pr-watch opens a floating placeholder pane in the tab, without focus, the plugin swaps the session's pane
 in for it, and then embeds it: zellij places the session among the tab's panes as it places a new one. In a tab that
 follows a swap layout, the session lands where the layout puts a new pane, in its stack if it has one, and the tab

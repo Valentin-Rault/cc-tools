@@ -4,11 +4,13 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -139,6 +141,7 @@ type zellijPane struct {
 	Title        string `json:"title"`
 	Command      string `json:"pane_command"`
 	Cwd          string `json:"pane_cwd"`
+	PluginURL    string `json:"plugin_url"`
 }
 
 // zellijPanes is the terminal panes of a zellij session, by ID; plugins left out.
@@ -162,8 +165,9 @@ func zellijPanes(session string) (map[int]zellijPane, error) {
 
 // zellijTab is a tab as zellij lists it.
 type zellijTab struct {
-	TabID int    `json:"tab_id"`
-	Name  string `json:"name"`
+	TabID           int    `json:"tab_id"`
+	Name            string `json:"name"`
+	FloatingVisible bool   `json:"are_floating_panes_visible"`
 }
 
 func zellijTabs(session string) ([]zellijTab, error) {
@@ -246,23 +250,92 @@ func (z zellijMux) MoveToTabs(moves []Move) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), pipeTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "zellij", "--session", zellijSession, "pipe", "--plugin", "file:"+z.plugin,
+	out, err := exec.CommandContext(ctx, zellijBin(), "--session", zellijSession, "pipe", "--plugin", "file:"+z.plugin,
 		"--plugin-configuration", tabsProtocol, "--name", "place", "--", strings.Join(lines, "\n")).CombinedOutput()
 	answer := strings.TrimSpace(string(out))
 	switch {
 	case ctx.Err() != nil:
-		return fmt.Errorf("the tabs plugin didn't answer: grant it its permissions in zellij, which "+
-			"`zellij plugin --floating -- file:%s` asks for", z.plugin)
+		return z.notAnswering(zellijSession)
 	case err != nil:
 		return fmt.Errorf("zellij pipe: %v %s", err, answer)
 	case strings.Contains(answer, "expected --name"):
+		// zellij keeps each plugin it compiles, by path, for every instance it launches from there until it loads
+		// the file again: after an install, the plugin that answers may be an older copy
+		if z.reload(zellijSession) {
+			return fmt.Errorf("zellij ran an older copy of the tabs plugin: it loads %s again, and asks you for its "+
+				"permissions in the tab the plugin runs in if it needs new ones", z.plugin)
+		}
 		return fmt.Errorf("the tabs plugin is older than pr-watch (it says %q): run make install, with cargo", answer)
 	case !strings.HasPrefix(answer, "queued"):
 		return fmt.Errorf("tabs plugin: %q", cmp.Or(answer, "no answer"))
 	}
 	return nil
+}
+
+// pipeTimeout is how long the plugin has to answer: it answers at once, unless it waits for its permissions.
+var pipeTimeout = 5 * time.Second
+
+// notAnswering: a plugin that waits for its permissions answers once you allow them. zellij asks in the plugin's
+// pane, floating in the tab the plugin runs in, but a plugin it launched for a pipe floats there behind the tab's
+// hidden floating panes, and one that hid itself before stays hidden: pr-watch shows the tab's floating panes, or has
+// zellij load the plugin again, which brings out a hidden plugin that asks. Once each per zellij session, so as not
+// to put a question you dismissed back in front of you.
+func (z zellijMux) notAnswering(zellijSession string) error {
+	if tab, ok := z.asking(zellijSession); ok {
+		if !tab.FloatingVisible && z.once(zellijSession, "show") {
+			zellij(zellijSession, "show-floating-panes", "--tab-id", strconv.Itoa(tab.TabID))
+		}
+		return fmt.Errorf("the tabs plugin waits for its permissions: allow them in the %s tab, where zellij asks",
+			TabBase(tab.Name))
+	}
+	if z.reload(zellijSession) {
+		return errors.New("the tabs plugin waits for its permissions: zellij asks for them in the tab the plugin runs in")
+	}
+	return fmt.Errorf("the tabs plugin didn't answer: `zellij action start-or-reload-plugin --configuration %s file:%s` "+
+		"has zellij ask for its permissions", tabsProtocol, z.plugin)
+}
+
+// asking is the tab where the plugin floats: it does while zellij asks for its permissions, and hides itself once it
+// has them.
+func (z zellijMux) asking(zellijSession string) (zellijTab, bool) {
+	out, err := zellij(zellijSession, "list-panes", "--all", "--json")
+	var panes []zellijPane
+	if err != nil || json.Unmarshal([]byte(out), &panes) != nil {
+		return zellijTab{}, false
+	}
+	tabs, _ := zellijTabs(zellijSession)
+	for _, p := range panes {
+		if p.IsPlugin && p.PluginURL == "file:"+z.plugin && p.IsFloating && !p.IsSuppressed {
+			for _, tab := range tabs {
+				if tab.TabID == p.TabID {
+					return tab, true
+				}
+			}
+			return zellijTab{TabID: p.TabID, Name: p.TabName}, true
+		}
+	}
+	return zellijTab{}, false
+}
+
+// done is what pr-watch did once already for the plugin, by zellij session.
+var done sync.Map
+
+// once: the first time pr-watch asks to do what in this zellij session.
+func (z zellijMux) once(zellijSession, what string) bool {
+	_, did := done.LoadOrStore(zellijSession+" "+z.plugin+" "+what, true)
+	return !did
+}
+
+// reload has zellij load the plugin from its file again, the first time pr-watch asks in this zellij session: once
+// is enough, and again would ask again for permissions you didn't allow yet.
+func (z zellijMux) reload(zellijSession string) bool {
+	if !z.once(zellijSession, "reload") {
+		return false
+	}
+	_, err := zellij(zellijSession, "start-or-reload-plugin", "--configuration", tabsProtocol, "file:"+z.plugin)
+	return err == nil
 }
 
 // tabsProtocol is the configuration pr-watch launches the plugin with. zellij keeps running the plugin instance it

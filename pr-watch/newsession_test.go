@@ -376,6 +376,24 @@ func TestNewSessionToReviewAPR(t *testing.T) {
 	}
 }
 
+// c on To review has the focused request's key typed, the cursor after it; on the other lists the issue is empty.
+func TestNewSessionFromToReview(t *testing.T) {
+	m := testModel(t)
+	m.mx, m.cfg.RepoDir = &tabRecorder{}, "/code/widgets"
+	rolls(t, "5be", "c40")
+	m.focus(panelReview)
+	typeIn(m, "c")
+	if s := m.starting; s == nil || s.issue != (entry{"pr-2711", 7}) || s.onPrompt || m.newSessionName() != "pr-2711-5b" {
+		t.Fatalf("form on To review: %+v", m.starting)
+	}
+	typeIn(m, "esc")
+	m.focus(panelMine)
+	typeIn(m, "c")
+	if m.starting == nil || m.starting.issue != (entry{}) {
+		t.Errorf("form on My PRs: %+v", m.starting)
+	}
+}
+
 // A review session started with c owns the PR when it isn't yours. Its events wait until the session is listed,
 // then go to it; a session that can't start gives the PR back. On one of your PRs it claims nothing.
 func TestNewReviewSessionClaimsThePR(t *testing.T) {

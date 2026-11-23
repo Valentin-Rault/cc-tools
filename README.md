@@ -78,7 +78,7 @@ Claude's names never have: `widgets-a41`. When the issue already has a live sess
 goes to it instead. A PR's key, `pr-2754`, starts a session to review it: in the Reviewing tab, named `pr-2754-7c`,
 and what you type reaches it after `PR #2754: `. When the PR isn't yours, the session owns it from then on, so the
 replies and pushes after your review go to it; its events wait until the session is up, and go back to whoever had
-it if the session can't start.
+it if the session can't start. `c` on To review has the focused request's key, `pr-2754`, typed in the issue already.
 
 Keep it open in a terminal tab, a zellij tab or a tmux window while you want PRs watched; `q` stops it. While it's stopped nothing is polled, and on
 the next start it catches up from its last snapshot. `←`/`→` switch between the three lists, `tab` moves between the

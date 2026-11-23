@@ -16,7 +16,8 @@ import (
 // c starts a Claude session on an issue. A form asks for the issue and, if you want, what to tell the session; ⏎
 // opens it in repo_dir, in a new pane of the WIP tab, named for the issue (fdn-3174-7c). It starts on whatever the
 // clone has checked out, like a session you start by hand, and makes its own worktree and branch. With nothing to
-// tell it, it waits for you. A PR's key, pr-2754, starts a session to review it, in the Reviewing tab.
+// tell it, it waits for you. A PR's key, pr-2754, starts a session to review it, in the Reviewing tab; c on To review
+// has the focused request's key typed already.
 
 // newSession is c's form.
 type newSession struct {
@@ -135,6 +136,10 @@ func (m *model) openNewSession() {
 		m.flash = "starting a session needs repo_dir in " + configPath()
 	default:
 		m.starting = &newSession{roll: suffix(3)}
+		if pr := m.rowPR(); m.panel() == panelReview && pr != 0 { // the request under the cursor, to review
+			key := fmt.Sprintf("pr-%d", pr)
+			m.starting.issue = entry{text: key, at: len(key)}
+		}
 		m.keepNameFree()
 	}
 }

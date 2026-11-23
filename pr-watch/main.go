@@ -12,6 +12,7 @@ import (
 )
 
 const usage = `pr-watch                          open the TUI: watch your open PRs, send each event to the PR's owner session
+pr-watch init                     set pr-watch up: check what it needs, write its config, add the Claude Code hooks
 pr-watch claim <session> <pr>...  route those PRs' events to that Claude session
 pr-watch send <session> [text]    test delivery: send text (or a sample event) to a session, print the outcome
 pr-watch tabs                     show which tab each Claude session would move to, without moving any
@@ -47,6 +48,10 @@ func main() {
 			}
 		}
 		if err := store.Claim(owner, prs); err != nil {
+			fail(err)
+		}
+	case args[0] == "init" && len(args) == 1:
+		if err := runInit(store); err != nil {
 			fail(err)
 		}
 	case args[0] == "tabs" && len(args) == 1:

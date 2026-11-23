@@ -26,6 +26,12 @@ type Mux interface {
 	MoveToTabs(moves []Move) error
 }
 
+// Readier is a multiplexer that needs setting up before it can move panes: in zellij, the tabs plugin, which answers
+// once installed and allowed its permissions. Ready says what's missing, nil once there's nothing.
+type Readier interface {
+	Ready() error
+}
+
 // Spot is where a pane is.
 type Spot struct {
 	Where   string // the zellij session, or the tmux server's socket

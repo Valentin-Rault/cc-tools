@@ -250,6 +250,20 @@ func (z zellijMux) MoveToTabs(moves []Move) error {
 	if len(lines) == 0 {
 		return nil
 	}
+	return z.ask(zellijSession, lines)
+}
+
+// Ready: the tabs plugin is installed, and answers in the zellij session pr-watch runs in, which it does once you
+// allowed its permissions. While zellij asks for them, it says where.
+func (z zellijMux) Ready() error {
+	if _, err := os.Stat(z.plugin); err != nil {
+		return fmt.Errorf("the tabs plugin isn't installed (%s): run make install, with cargo", z.plugin)
+	}
+	return z.ask(z.here, nil)
+}
+
+// ask pipes the moves to the plugin, none to see that it answers, and makes sense of its answer.
+func (z zellijMux) ask(zellijSession string, lines []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), pipeTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, zellijBin(), "--session", zellijSession, "pipe", "--plugin", "file:"+z.plugin,

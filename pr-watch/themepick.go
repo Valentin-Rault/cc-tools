@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -74,11 +76,13 @@ func (m *model) overlayThemes(lines []string, w int) []string {
 	return floatOverClear(lines, box, w, bw)
 }
 
-// themeSetting is "theme" in the config file, with what's around its value.
-var themeSetting = regexp.MustCompile(`("theme"\s*:\s*)"[^"]*"`)
-
 // saveTheme writes the theme into the config file and leaves the rest of it as it was, its order and spacing too.
-func saveTheme(path, name string) error {
+func saveTheme(path, name string) error { return saveSetting(path, "theme", name) }
+
+// saveSetting writes a setting with a string or boolean value into the config file and leaves the rest of it as it
+// was, its order and spacing too: the value replaces the one there, or the setting goes first, laid out like the
+// others.
+func saveSetting(path, key string, value any) error {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		b, err = []byte("{}\n"), nil
@@ -86,18 +90,21 @@ func saveTheme(path, name string) error {
 	if err != nil {
 		return err
 	}
-	value, _ := json.Marshal(name)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	setting := regexp.MustCompile(`(` + regexp.QuoteMeta(strconv.Quote(key)) + `\s*:\s*)("(?:[^"\\]|\\.)*"|true|false|null)`)
 	var out []byte
-	if themeSetting.Match(b) {
-		loc := themeSetting.FindSubmatchIndex(b)
-		out = slices.Concat(b[:loc[3]], value, b[loc[1]:])
+	if loc := setting.FindSubmatchIndex(b); loc != nil {
+		out = slices.Concat(b[:loc[3]], encoded, b[loc[1]:])
 	} else {
 		open := bytes.IndexByte(b, '{')
 		if open < 0 {
 			return fmt.Errorf("%s isn't a JSON object", path)
 		}
 		rest := b[open+1:]
-		entry := `"theme": ` + string(value)
+		entry := strconv.Quote(key) + ": " + string(encoded)
 		switch indent := regexp.MustCompile(`^[ \t]*\r?\n([ \t]*)\S`).FindSubmatch(rest); {
 		case strings.HasPrefix(strings.TrimSpace(string(rest)), "}"): // empty
 			entry = " " + entry + " "
@@ -108,9 +115,9 @@ func saveTheme(path, name string) error {
 		}
 		out = slices.Concat(b[:open+1], []byte(entry), rest)
 	}
-	var check struct{ Theme string }
-	if err := json.Unmarshal(out, &check); err != nil || check.Theme != name {
-		return fmt.Errorf("couldn't write the theme into %s", path)
+	var check map[string]any
+	if err := json.Unmarshal(out, &check); err != nil || !reflect.DeepEqual(check[key], value) {
+		return fmt.Errorf("couldn't write %s into %s", key, path)
 	}
 	return writeKeepingMode(path, out)
 }

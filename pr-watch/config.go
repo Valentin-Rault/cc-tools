@@ -38,6 +38,9 @@ type Config struct {
 
 func configPath() string { return settings.Path() }
 
+// errNoRepo: the config doesn't say which repo to watch, which pr-watch init asks.
+var errNoRepo = errors.New("no repo to watch")
+
 func loadConfig() (Config, error) {
 	path := configPath()
 	c := Config{Ignore: []string{"github-actions", "dependabot"}, File: path,
@@ -72,7 +75,7 @@ func loadConfig() (Config, error) {
 		}
 	}
 	if c.Repo == "" {
-		return c, fmt.Errorf(`no repo to watch: create %s with {"repo": "owner/name", "repo_dir": "~/code/name"}`, path)
+		return c, fmt.Errorf(`%w: run pr-watch init, or create %s with {"repo": "owner/name", "repo_dir": "~/code/name"}`, errNoRepo, path)
 	}
 	return c, nil
 }

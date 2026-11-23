@@ -8,14 +8,36 @@ Small tools for running many [Claude Code](https://claude.com/claude-code) sessi
 | [`cc-status`](#cc-status) | Shows which Claude sessions in your zellij or tmux panes need you, and jumps to them. |
 | [`hooks/pr-guard.sh`](#pr-guard) | A Claude Code hook that keeps merging your call: Claude can't merge, enqueue or enable auto-merge. |
 
-macOS, Claude Code, `gh` (logged in), `git`, `jq`, and Go 1.24+ to build pr-watch. pr-watch runs in any terminal;
-a few of its features need zellij 0.45+ or tmux 3.0+ ([which](#in-zellij-tmux-or-neither)), and in zellij, Rust with
-the `wasm32-wasip1` target to build its plugin (`make install` skips it without `cargo`). cc-status needs zellij or tmux.
+## Getting started
+
+macOS, Claude Code, `gh`, `git`, `jq`, and Go 1.24+ to build pr-watch. pr-watch runs in any terminal; a few of its
+features need zellij 0.45+ or tmux 3.0+ ([which](#in-zellij-tmux-or-neither)), and in zellij, Rust to build its
+plugin, with its WebAssembly target: `rustup target add wasm32-wasip1` (`make install` skips the plugin without
+`cargo`). cc-status needs zellij or tmux. `~/.local/bin` goes on your `PATH`.
 
 ```sh
-make install   # builds pr-watch into ~/.claude/pr-watch/ and links it and cc-status into ~/.local/bin, pr-guard into ~/.claude/hooks
-make test
+gh auth login
+make install                         # pr-watch, cc-status and pr-guard, below
+cd ~/code/widgets && pr-watch init   # from a clone of the repo whose PRs you author
+pr-watch                             # in zellij or tmux, for g, c and tabs by stage
 ```
+
+`make install` builds pr-watch into `~/.claude/pr-watch/`, cc-status into `~/.claude/cc-status/` and the zellij
+plugin into `~/.config/zellij/plugins/`, links pr-watch and cc-status into `~/.local/bin`, and pr-guard into
+`~/.claude/hooks/`. `pr-watch init` sets up the rest, asking first:
+
+- **Checks** what pr-watch needs, and says how to get what's missing.
+- **The config** ([below](#pr-watch)), from your answers: it guesses the repo and its clone from where you run it
+  (the main clone, from a worktree), lists your teams for `security_team`, and offers `arrange_tabs` in zellij or
+  tmux. A config already there keeps the rest of what's in it, laid out as it was.
+- **The hooks** cc-status and pr-guard work through, into `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR`), after a
+  y/n that lists them: only those missing, with a copy of the file as it was beside it.
+- **zellij's tabs plugin**: it has zellij ask for its permissions, says in which tab, and waits for you to allow
+  them there.
+- **GitHub**: that it sees the repo's PRs, yours and the ones to review.
+
+Run again, it changes only what you change. It leaves zellij's and tmux's own config alone: it prints the key to add
+for cc-status's popup ([cc-status](#cc-status)) when there's none.
 
 ## pr-watch
 
@@ -160,8 +182,8 @@ the search counts as merged or closed only once GitHub says so: search can leave
 A refresh costs about 27 of GraphQL's 5000 points an hour. Review requests and mentions on other people's PRs show in the *To review* list, and with
 `"notify": true` in the config also as one macOS notification each.
 
-**Config** in `~/.config/pr-watch/config.json` (`PR_WATCH_REPO`, `PR_WATCH_REPO_DIR` and `PR_WATCH_IGNORE`
-override it):
+**Config** in `~/.config/pr-watch/config.json` (`PR_WATCH_CONFIG`; `PR_WATCH_REPO`, `PR_WATCH_REPO_DIR` and
+`PR_WATCH_IGNORE` override it). `pr-watch init` writes `repo`, `repo_dir`, `security_team` and `arrange_tabs`:
 
 ```json
 {
@@ -169,12 +191,13 @@ override it):
   "repo_dir": "~/code/widgets",
   "ignore": ["github-actions", "dependabot"],
   "security_team": "security",
+  "arrange_tabs": true,
   "theme": "tokyonight"
 }
 ```
 
 `ignore` lists logins whose reviews and comments never need action. `security_team` is the slug of a team whose
-review some PRs need (optional). `theme` is what `t` last picked. State lives in `~/.pr-watch/`
+review some PRs need (optional). `arrange_tabs` keeps each session in the tab of its stage ([below](#tabs-by-stage)). `theme` is what `t` last picked. State lives in `~/.pr-watch/`
 (`PR_WATCH_DIR`); `events.log` there is the history of everything detected and sent.
 
 **Keys.** `"keys"` in the config binds actions to other keys:
@@ -242,8 +265,8 @@ gets two for the same PRs.
 tmux moves a pane to another window itself (`join-pane`, `break-pane`); a pane alone in its window takes the window
 along, renamed. zellij's command line can't move a pane to another tab, so there a small plugin does
 (`zellij-tabs/`, Rust built for `wasm32-wasip1`; `make install` puts it in `~/.config/zellij/plugins/`). zellij asks
-you for its permissions the first time pr-watch uses it, and again when an install needs new ones: pr-watch says in
-which tab zellij asks, so you can allow them there. zellij keeps running the copy of a plugin it compiled first, until
+you for its permissions the first time pr-watch uses it (`pr-watch init` has it ask then), and again when an install
+needs new ones: pr-watch says in which tab zellij asks, so you can allow them there. zellij keeps running the copy of a plugin it compiled first, until
 it loads the file again: after an install, pr-watch has it do that once. In zellij 0.45.1 the plugin API can't move a pane into most existing tabs
 either, so pr-watch opens a floating placeholder pane in the tab, without focus, the plugin swaps the session's pane
 in for it, and then embeds it: zellij places the session among the tab's panes as it places a new one. In a tab that
@@ -313,12 +336,14 @@ cc-status ui     # pick a session and jump to it; meant for a floating zellij pa
 cc-status list   # print the overview once
 ```
 
-Hook it into `~/.claude/settings.json` (async, so it never slows Claude down) for `SessionStart`,
-`UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PermissionDenied`, `PostToolUse`,
-`PostToolUseFailure`, `Notification`, `Stop`, `StopFailure` and `SessionEnd`:
+`pr-watch init` hooks it into `~/.claude/settings.json`. By hand, it's this group (async, so it never slows Claude
+down), with the full path to `~/.local/bin/cc-status`, on `SessionStart`, `UserPromptSubmit`, `Notification`,
+`Stop`, `StopFailure` and `SessionEnd`, and with a `"matcher"` on the tool events: `"AskUserQuestion|ExitPlanMode"`
+on `PreToolUse` (the tools that wait for you; for the others it changes nothing), `"*"` on `PermissionRequest`,
+`PermissionDenied`, `PostToolUse` and `PostToolUseFailure`:
 
 ```json
-{ "hooks": [{ "type": "command", "command": "~/.local/bin/cc-status", "args": ["hook"], "timeout": 10, "async": true }] }
+{ "matcher": "*", "hooks": [{ "type": "command", "command": "/Users/you/.local/bin/cc-status", "args": ["hook"], "timeout": 10, "async": true }] }
 ```
 
 and bind the popup in zellij's `config.kdl`, or in `.tmux.conf`:
@@ -353,12 +378,16 @@ focus glow. pr-watch's `g` plays the same cue when it jumps to a PR's owner.
 
 A `PreToolUse` hook for `Bash`. It denies merging a PR, adding it to the merge queue and enabling auto-merge, in
 every session; `m` in pr-watch is how you queue your own PRs. Everything else, pushes and PR comments included, goes through as usual.
+`pr-watch init` adds it to `~/.claude/settings.json`; by hand, with the full path:
 
 ```json
-"PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/hooks/pr-guard.sh", "timeout": 10 }] }]
+"PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "/Users/you/.claude/hooks/pr-guard.sh", "timeout": 10 }] }]
 ```
 
 ## Contributing
+
+`make test` runs the tests; the zellij ones start zellij sessions of their own, and skip with `-short` or without
+zellij, tmux or cargo.
 
 `make audit` checks every commit for words listed in a gitignored `.private-words` file and runs gitleaks. The same
 check runs as a pre-commit hook: `printf '#!/bin/sh\nexec scripts/check-private.sh\n' > .git/hooks/pre-commit`.

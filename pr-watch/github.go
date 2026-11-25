@@ -37,10 +37,12 @@ const reviewFields = `number title url isDraft createdAt additions deletions aut
     reviewRequests(first: 20) { nodes { asCodeOwner requestedReviewer { ... on Team { slug } ... on User { login } } } }
     latestOpinionatedReviews(first: 10) { nodes { state author { login } onBehalfOf(first: 5) { nodes { slug } } } }`
 
-// searchQuery: your PRs, the PRs asking for your review, in two searches so that the ones naming you all show
+// The searches: your PRs, the PRs asking for your review, in two searches so that the ones naming you all show
 // however many your teams are asked for (those are the newest 30, and how many there are), and the PRs you reviewed.
-const searchQuery = `query($mine: String!, $review: String!, $teamReview: String!, $reviewed: String!, $me: String!) {
-  mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest {
+// Each is its own request: one query with all four ran past GitHub's time limit on busy days (504), and a slow one
+// now fails alone, retried without redoing the others.
+const mineQuery = `query($q: String!) {
+  search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest {
     id number title url isDraft headRefName headRefOid baseRefName mergeable reviewDecision mergeQueueEntry { state }
     commits(last: 1) { nodes { commit { ` + checkFields + ` } } }
     reviews(last: 20) { nodes { id state url bodyText author { login } } }
@@ -48,15 +50,21 @@ const searchQuery = `query($mine: String!, $review: String!, $teamReview: String
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } } } }
     latestOpinionatedReviews(first: 10) { nodes { state onBehalfOf(first: 5) { nodes { slug } } } }
   } } }
-  review: search(query: $review, type: ISSUE, first: 30) { nodes { ... on PullRequest { ` + reviewFields + ` } } }
-  teamReview: search(query: $teamReview, type: ISSUE, first: 30) { issueCount nodes { ... on PullRequest { ` + reviewFields + ` } } }
-  reviewed: search(query: $reviewed, type: ISSUE, first: 30) { nodes { ... on PullRequest {
+}`
+
+const reviewQuery = `query($q: String!) {
+  search(query: $q, type: ISSUE, first: 30) { issueCount nodes { ... on PullRequest { ` + reviewFields + ` } } }
+}`
+
+// reviewedQuery is the heaviest: up to 30 PRs, each with its review threads and their comments.
+const reviewedQuery = `query($q: String!, $me: String!) {
+  search(query: $q, type: ISSUE, first: 30) { nodes { ... on PullRequest {
     id number title url isDraft headRefOid headRefName author { login }
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
     reviews(last: 10, author: $me) { nodes { state submittedAt commit { oid } } }
     commits(last: 50) { nodes { commit { oid } } }
     comments(last: 30) { nodes { id url createdAt author { login } } }
-    reviewThreads(last: 30) { nodes { comments(last: 10) { nodes { id url createdAt author { login } } } } }
+    reviewThreads(last: 20) { nodes { comments(last: 10) { nodes { id url createdAt author { login } } } } }
   } } }
 }`
 
@@ -243,16 +251,55 @@ func (c *ghClient) Login() (string, error) {
 	return u.Login, err
 }
 
+// Search runs the four searches one after the other (GitHub asks clients not to fire requests at once), and fails
+// when any does: a refresh with one part missing would read its PRs as closed.
 func (c *ghClient) Search(repo, me string) (*searchData, error) {
 	var d searchData
-	err := c.gql.Do(searchQuery, map[string]any{
-		"mine":       "repo:" + repo + " is:pr is:open author:@me",
-		"review":     "repo:" + repo + " is:pr is:open user-review-requested:@me",
-		"teamReview": "repo:" + repo + " is:pr is:open review-requested:@me -user-review-requested:@me",
-		"reviewed":   "repo:" + repo + " is:pr is:open reviewed-by:@me -author:@me sort:updated-desc",
-		"me":         me,
-	}, &d)
-	return &d, err
+	in := "repo:" + repo + " is:pr is:open "
+	if err := runSearch(c, "your PRs", mineQuery, map[string]any{"q": in + "author:@me"}, &d.Mine); err != nil {
+		return nil, err
+	}
+	var review struct{ Nodes []reviewNode }
+	if err := runSearch(c, "review requests", reviewQuery, map[string]any{"q": in + "user-review-requested:@me"}, &review); err != nil {
+		return nil, err
+	}
+	d.Review.Nodes = review.Nodes
+	q := in + "review-requested:@me -user-review-requested:@me"
+	if err := runSearch(c, "team review requests", reviewQuery, map[string]any{"q": q}, &d.TeamReview); err != nil {
+		return nil, err
+	}
+	q = in + "reviewed-by:@me -author:@me sort:updated-desc"
+	if err := runSearch(c, "PRs you reviewed", reviewedQuery, map[string]any{"q": q, "me": me}, &d.Reviewed); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func runSearch[T any](c *ghClient, what, query string, vars map[string]any, into *T) error {
+	var r struct{ Search T }
+	if err := c.query(query, vars, &r); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	*into = r.Search
+	return nil
+}
+
+// retryWaits are the pauses before each retry of a read that GitHub answered 502 or 504: its gateway gave up on a
+// query that ran too long, and the same query often goes through a moment later.
+var retryWaits = []time.Duration{2 * time.Second, 5 * time.Second}
+
+// query runs a read-only GraphQL query, retrying a 502 or 504. Mutations don't come here: a 504 doesn't say whether
+// GitHub went ahead.
+func (c *ghClient) query(q string, vars map[string]any, resp any) error {
+	for i := 0; ; i++ {
+		err := c.gql.Do(q, vars, resp)
+		var he *api.HTTPError
+		if i == len(retryWaits) || !errors.As(err, &he) ||
+			(he.StatusCode != http.StatusBadGateway && he.StatusCode != http.StatusGatewayTimeout) {
+			return err
+		}
+		time.Sleep(retryWaits[i])
+	}
 }
 
 func (c *ghClient) States(repo string, prs []int) (map[int]string, error) {
@@ -266,7 +313,7 @@ func (c *ghClient) States(repo string, prs []int) (map[int]string, error) {
 	var d struct {
 		Repository map[string]*struct{ State string }
 	}
-	if err := c.gql.Do(q.String(), map[string]any{"owner": owner, "name": name}, &d); err != nil {
+	if err := c.query(q.String(), map[string]any{"owner": owner, "name": name}, &d); err != nil {
 		return nil, err
 	}
 	states := map[int]string{}
@@ -291,7 +338,7 @@ func (c *ghClient) Teams(owner, me string) (map[string]int, error) {
 			}
 		}
 	}
-	err := c.gql.Do(`query($owner: String!, $me: String!) { repositoryOwner(login: $owner) { ... on Organization {
+	err := c.query(`query($owner: String!, $me: String!) { repositoryOwner(login: $owner) { ... on Organization {
   teams(first: 100, userLogins: [$me]) { nodes { slug members { totalCount } } } } } }`, map[string]any{"owner": owner, "me": me}, &d)
 	if err != nil {
 		return nil, err
@@ -326,7 +373,7 @@ var errHeadMoved = errors.New("the PR moved on since pr-watch last looked")
 // checks the PR's head first, and approves nothing when it moved on.
 func (c *ghClient) Approve(prID, head string) error {
 	var d struct{ Node *struct{ HeadRefOid string } }
-	err := c.gql.Do(`query($id: ID!) { node(id: $id) { ... on PullRequest { headRefOid } } }`, map[string]any{"id": prID}, &d)
+	err := c.query(`query($id: ID!) { node(id: $id) { ... on PullRequest { headRefOid } } }`, map[string]any{"id": prID}, &d)
 	switch {
 	case err != nil:
 		return err

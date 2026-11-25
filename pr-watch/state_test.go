@@ -14,7 +14,7 @@ func TestClaim(t *testing.T) {
 	if err := s.Claim(Owner{"feat-x", "id-1"}, []int{12, 40}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.read("owners"); got != "3 other\n12 feat-x id-1\n40 feat-x id-1" {
+	if got := s.read("owners"); got != "3\tother\n12\tfeat-x\tid-1\n40\tfeat-x\tid-1" {
 		t.Errorf("owners = %q", got)
 	}
 	if o := s.Owners(); o[3] != (Owner{Name: "other"}) || o[40] != (Owner{"feat-x", "id-1"}) {
@@ -22,6 +22,31 @@ func TestClaim(t *testing.T) {
 	}
 	if !s.HotUntil().After(time.Now().Add(hotFor - time.Minute)) {
 		t.Errorf("a claim should switch on hot mode, hot-until = %v", s.HotUntil())
+	}
+}
+
+// A session name can have spaces. Written by an older pr-watch, the name ran into the ID ("QBO" owned the PR, under
+// an ID no session has), and every rewrite of the file squashed the spaces out for good.
+func TestOwnerNamesWithSpaces(t *testing.T) {
+	const id = "84ddd875-cf6d-424a-93e0-30bf0faeb39b"
+	s := Store{Dir: t.TempDir()}
+	s.write("owners", "4484 QBO onboarding address population "+id+"\n4485 QBO onboarding [e26e2a]\n4486 feat-x [e26e2a]\n")
+	want := map[int]Owner{4484: {"QBO onboarding address population", id}, 4485: {Name: "QBO onboarding"}, 4486: {Name: "feat-x"}}
+	for pr, o := range want {
+		if got := s.Owners()[pr]; got != o {
+			t.Errorf("old line for #%d: %+v, want %+v", pr, got, o)
+		}
+	}
+	if err := s.Claim(Owner{"pr-1-ab", "id-1"}, []int{1}); err != nil { // rewrites every line
+		t.Fatal(err)
+	}
+	if err := s.Claim(Owner{"QBO onboarding address population", id}, []int{4490}); err != nil {
+		t.Fatal(err)
+	}
+	for pr, o := range map[int]Owner{4484: want[4484], 4490: want[4484], 1: {"pr-1-ab", "id-1"}} {
+		if got := s.Owners()[pr]; got != o {
+			t.Errorf("after rewrites, #%d: %+v, want %+v", pr, got, o)
+		}
 	}
 }
 

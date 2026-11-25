@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -68,23 +69,50 @@ func (s Store) lines(name string) []string {
 // becomes a topic name), so the session ID recorded at claim time identifies it; Name is what it was called then.
 type Owner struct{ Name, SessionID string }
 
-// Owners maps a PR number to its owner. Lines are "<pr> <session name> [<session id>]".
+// Owners maps a PR number to its owner. Lines are "<pr>\t<session name>[\t<session id>]": tabs, because a session
+// name can have spaces ("QBO onboarding address population"). Lines without a tab are the older space-separated form.
 func (s Store) Owners() map[int]Owner {
 	owners := map[int]Owner{}
 	for _, line := range s.lines("owners") {
-		f := strings.Fields(line)
-		if len(f) < 2 {
+		n, o, ok := parseOwner(line)
+		if !ok {
 			continue
 		}
-		if n, err := strconv.Atoi(f[0]); err == nil {
-			o := Owner{Name: bareName(f[1]), SessionID: strings.Join(f[2:], "")}
-			if isRef(o.SessionID) { // a claim made as "name [ref]": the ref isn't the session's ID
-				o.SessionID = ""
-			}
-			owners[n] = o
+		if isRef(o.SessionID) { // a claim made as "name [ref]": the ref isn't the session's ID
+			o.SessionID = ""
 		}
+		owners[n] = o
 	}
 	return owners
+}
+
+// uuid is the shape of a Claude Code session ID.
+var uuid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func parseOwner(line string) (int, Owner, bool) {
+	var f []string
+	if strings.Contains(line, "\t") {
+		f = strings.Split(line, "\t")
+	} else { // "<pr> <name> [<id>]", where a name with spaces ran into the ID
+		f = strings.Fields(line)
+		if last := len(f) - 1; last > 2 && (uuid.MatchString(f[last]) || isRef(f[last])) {
+			f = []string{f[0], strings.Join(f[1:last], " "), f[last]}
+		} else if last > 2 {
+			f = []string{f[0], f[1], strings.Join(f[2:], "")}
+		}
+	}
+	if len(f) < 2 {
+		return 0, Owner{}, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(f[0]))
+	if err != nil {
+		return 0, Owner{}, false
+	}
+	o := Owner{Name: bareName(strings.TrimSpace(f[1]))}
+	if len(f) > 2 {
+		o.SessionID = strings.TrimSpace(f[2])
+	}
+	return n, o, o.Name != ""
 }
 
 // Claim routes the PRs' events to owner.
@@ -123,7 +151,11 @@ func (s Store) editOwners(edit func(map[int]Owner)) error {
 	edit(owners)
 	var b strings.Builder
 	for _, n := range slices.Sorted(maps.Keys(owners)) {
-		fmt.Fprintln(&b, strings.TrimSpace(fmt.Sprintf("%d %s %s", n, owners[n].Name, owners[n].SessionID)))
+		line := fmt.Sprintf("%d\t%s", n, owners[n].Name)
+		if owners[n].SessionID != "" {
+			line += "\t" + owners[n].SessionID
+		}
+		fmt.Fprintln(&b, line)
 	}
 	return s.write("owners", b.String())
 }

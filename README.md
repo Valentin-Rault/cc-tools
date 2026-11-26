@@ -247,7 +247,8 @@ its stage (a tmux window in tmux), creating the tabs as needed:
 A session moves when its stage changes, never while you're in its pane, and a pane you move by hand stays until
 its stage changes again. A session with no PR yet, or only drafts, stays in the tab you started it in;
 only one coming back from In review, its PR in draft again, moves to WIP. A session started from the `o` picker opens in the tab of its stage, and one started with `c` in WIP, or in
-Reviewing for a PR's key (`pr-2754`). Sessions working
+Reviewing for a PR's key (`pr-2754`). One started for an issue counts as reviewing a PR only once it claims it:
+the PRs it names, like one whose changes overlap its own, are context. Sessions working
 outside the repo are left alone. `pr-watch tabs` prints what would move where without moving anything.
 
 **The last message.** A session whose stage turns Done gets one last message, through the events like any other (in

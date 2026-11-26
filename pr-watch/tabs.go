@@ -82,11 +82,18 @@ func (v tabView) reviewing(s Session) bool {
 		if o, ok := v.owners[pr]; ok && sameSession(o, s) {
 			return true
 		}
-		if r, ok := clearReviewer(v.mentions, pr); ok && r.SessionID == s.SessionID {
+		if v.namedMost(s, pr) {
 			return true
 		}
 	}
 	return false
+}
+
+// namedMost: the session is clearly the one that named the PR most. One started for an issue builds that issue:
+// the PRs it names, like one whose changes overlap its own, are context, not a review.
+func (v tabView) namedMost(s Session, pr int) bool {
+	r, ok := clearReviewer(v.mentions, pr)
+	return ok && r.SessionID == s.SessionID && !startedForIssue(s.Name)
 }
 
 // finished: the session worked on or reviewed a PR that pr-watch saw merged or closed. Not being among your open
@@ -106,7 +113,7 @@ func (v tabView) finishedPRs(s Session) (prs []int, reviewer bool) {
 	}
 	if len(prs) == 0 {
 		for pr := range v.mentions {
-			if r, ok := clearReviewer(v.mentions, pr); ok && r.SessionID == s.SessionID && v.closed[pr] {
+			if v.namedMost(s, pr) && v.closed[pr] {
 				prs = append(prs, pr)
 			}
 		}

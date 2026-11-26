@@ -19,10 +19,11 @@ func TestStage(t *testing.T) {
 			"12": {Branch: "feat/c", Draft: true},
 		},
 		reviewed: []ReviewedPR{{Number: 30}},
-		toReview: []ReviewRequest{{Number: 31}},
+		toReview: []ReviewRequest{{Number: 31}, {Number: 32}},
 		owners:   map[int]Owner{12: {Name: "stack", SessionID: "s-stack"}, 31: {Name: "rev2", SessionID: "s-rev2"}},
 		links:    map[int]prLink{11: {SessionID: "s-stack"}, 99: {SessionID: "s-done"}, 100: {SessionID: "s-opened"}},
-		mentions: map[int][]mention{30: {{SessionID: "s-rev", Count: 9}}, 98: {{SessionID: "s-revdone", Count: 7}}, 97: {{SessionID: "s-lookup", Count: 5}}},
+		mentions: map[int][]mention{30: {{SessionID: "s-rev", Count: 9}}, 98: {{SessionID: "s-revdone", Count: 7}}, 97: {{SessionID: "s-lookup", Count: 5}},
+			32: {{SessionID: "s-issue", Count: 9}}},
 		closed:   map[int]bool{99: true, 98: true},
 		repoDirs: []string{"/code/widgets", "/code/widgets-a"},
 	}
@@ -32,7 +33,8 @@ func TestStage(t *testing.T) {
 	}{
 		{Session{SessionID: "s-draft", Cwd: "/code/widgets-a", Branch: "feat/a"}, stageWIP},    // its only PR is a draft
 		{Session{SessionID: "s-stack", Cwd: "/code/widgets"}, stageReview},                     // a stack: #12 draft, #11 in review
-		{Session{SessionID: "s-rev", Cwd: "/code/widgets"}, stageReviewing},                    // clearly the one reviewing #30
+		{Session{SessionID: "s-rev", Name: "pr-30-1f", Cwd: "/code/widgets"}, stageReviewing},  // clearly the one reviewing #30
+		{Session{SessionID: "s-issue", Name: "app-7-e9", Cwd: "/code/widgets"}, stageWIP},      // started for APP-7: named #32 most, as context
 		{Session{SessionID: "s-rev2", Name: "rev2", Cwd: "/code/widgets/sub"}, stageReviewing}, // confirmed reviewer of #31
 		{Session{SessionID: "s-done", Cwd: "/code/widgets"}, stageDone},                        // its PR #99 is closed
 		{Session{SessionID: "s-revdone", Cwd: "/code/widgets"}, stageDone},                     // the PR it reviewed is closed

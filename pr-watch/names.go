@@ -36,6 +36,13 @@ func typedIssue(s string) (string, bool) {
 	return s, typedKey.MatchString(s)
 }
 
+// startedForIssue: pr-watch started the session for an issue, so it has the name newSessionName gave it (app-1435-e9).
+func startedForIssue(name string) bool {
+	i := strings.LastIndexByte(name, '-')
+	key, ok := typedIssue(name[:max(i, 0)])
+	return ok && !reviewKey(key)
+}
+
 // issueOf is the issue a PR's title names: its last key, where titles put it (… (FDN-3169)), so a UTF-8 or ISO-8601
 // earlier in the title isn't taken for one.
 func issueOf(title string) string {

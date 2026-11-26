@@ -282,4 +282,11 @@ func TestList(t *testing.T) {
 	if !slices.Equal(lines, want) {
 		t.Errorf("list:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
+
+	os.WriteFile(filepath.Join(stateDir(), "week"), []byte("week 42% · resets Mon 09:00"), 0o644)
+	summary := "week 42% · resets Mon 09:00 · 1 need you"
+	if got, want := layout(collect(), -1, 100, 0, ansiPainter{}, false, "")[0],
+		" Claude sessions"+strings.Repeat(" ", 100-16-runeLen(summary)-1)+summary; got != want {
+		t.Errorf("heading with the weekly usage:\n%q\nwant:\n%q", got, want)
+	}
 }

@@ -367,6 +367,16 @@ set -g window-status-current-format '#I:#W#{?@cc_status, #{@cc_status},}'
 
 The jump's title cue shows in tmux only with `pane-border-status` on; the glow shows either way.
 
+The heading also shows Claude's weekly usage (all models), once your status line command saves it to
+`~/.local/state/cc-status/week`. Claude Code gives status lines `rate_limits` on a Claude subscription; in a bash
+status line that has read its input into `$input`:
+
+```bash
+week=$(echo "$input" | jq -r '.rate_limits.seven_day // empty | "week \(.used_percentage | round)% · resets \(.resets_at | strflocaltime("%a %H:%M"))"')
+f=~/.local/state/cc-status/week
+[ -n "$week" ] && printf %s "$week" >"$f.$$" && mv "$f.$$" "$f"
+```
+
 The popup is drawn in pr-watch's theme (`"theme"` in `~/.config/pr-watch/config.json`, which pr-watch's `t` picks)
 and follows its `"keys"` for the actions it has too: `up`, `down`, `open` (jump), `refresh` and `quit`; `esc` always
 closes it, and `1`-`9` jump to that row. `cc-status list` prints in the terminal's own colours.

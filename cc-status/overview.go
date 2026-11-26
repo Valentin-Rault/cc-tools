@@ -219,6 +219,10 @@ func layout(rows []row, selected, w, h int, p painter, interactive bool, footer 
 	if summary == "" {
 		summary = "nothing needs you"
 	}
+	// Claude's weekly usage, which a status line command saves (README, cc-status).
+	if week, err := os.ReadFile(filepath.Join(stateDir(), "week")); err == nil && len(week) > 0 {
+		summary = string(week) + " · " + summary
+	}
 	heading := " Claude sessions"
 	lines := []string{p.heading(heading) + strings.Repeat(" ", max(1, w-runeLen(heading)-runeLen(summary)-1)) + summary, ""}
 	if len(rows) == 0 {
